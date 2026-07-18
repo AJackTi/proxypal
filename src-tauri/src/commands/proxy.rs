@@ -559,11 +559,13 @@ pub async fn start_proxy(
             ])
             .output();
 
-        // Also kill any orphaned cliproxyapi processes by name
-        println!("[ProxyPal] Killing any orphaned cliproxyapi processes");
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "pkill -9 -f cliproxyapi 2>/dev/null"])
-            .output();
+        // Avoid killing another ProxyPal instance's sidecar in shared verification mode.
+        if std::env::var_os("PROXYPAL_SKIP_ORPHAN_CLEANUP").is_none() {
+            println!("[ProxyPal] Killing any orphaned cliproxyapi processes");
+            let _ = std::process::Command::new("sh")
+                .args(["-c", "pkill -9 -f cliproxyapi 2>/dev/null"])
+                .output();
+        }
     }
     #[cfg(windows)]
     {
@@ -867,21 +869,22 @@ pub async fn stop_proxy(
         }
     }
 
-    // Also kill any orphaned cliproxyapi processes by name (belt and suspenders)
-    #[cfg(unix)]
-    {
-        println!("[ProxyPal] Cleaning up any orphaned cliproxyapi processes");
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "pkill -9 -f cliproxyapi 2>/dev/null"])
-            .output();
-    }
-    #[cfg(windows)]
-    {
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "taskkill /F /IM cliproxyapi*.exe 2>nul"]);
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = cmd.output();
+    if std::env::var_os("PROXYPAL_SKIP_ORPHAN_CLEANUP").is_none() {
+        #[cfg(unix)]
+        {
+            println!("[ProxyPal] Cleaning up any orphaned cliproxyapi processes");
+            let _ = std::process::Command::new("sh")
+                .args(["-c", "pkill -9 -f cliproxyapi 2>/dev/null"])
+                .output();
+        }
+        #[cfg(windows)]
+        {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", "taskkill /F /IM cliproxyapi*.exe 2>nul"]);
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.output();
+        }
     }
 
     // Update status
