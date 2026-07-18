@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCodexRateLimits } from "./codexQuota";
+import { getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
 
 import type { CodexQuotaResult } from "../../../lib/tauri";
 
@@ -44,5 +44,24 @@ describe("getCodexRateLimits", () => {
         usedPercent: 25,
       },
     ]);
+  });
+});
+
+describe("isCodexQuotaExhausted", () => {
+  it("hides an account when its primary window reaches 100%", () => {
+    expect(isCodexQuotaExhausted({ ...baseAccount, primaryUsedPercent: 100 })).toBe(true);
+  });
+
+  it("hides an account when its secondary window reaches 100%", () => {
+    expect(
+      isCodexQuotaExhausted({
+        ...baseAccount,
+        secondaryUsedPercent: 100,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps accounts visible while all windows have remaining quota", () => {
+    expect(isCodexQuotaExhausted({ ...baseAccount, primaryUsedPercent: 99.9 })).toBe(false);
   });
 });

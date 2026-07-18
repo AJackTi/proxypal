@@ -2,7 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
-import { getCodexRateLimits } from "./codexQuota";
+import { getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
 
 const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
 
@@ -52,14 +52,16 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   const [hiddenAccounts, setHiddenAccounts] = createSignal<Set<string>>(new Set());
   const [showHiddenAccounts, setShowHiddenAccounts] = createSignal(false);
 
+  const isAccountHidden = (account: CodexQuotaResult) =>
+    hiddenAccounts().has(account.accountKey) || isCodexQuotaExhausted(account);
   const hiddenAccountCount = createMemo(
-    () => quotaData().filter((account) => hiddenAccounts().has(account.accountKey)).length,
+    () => quotaData().filter((account) => isAccountHidden(account)).length,
   );
   const visibleQuotaData = createMemo(() => {
     if (showHiddenAccounts()) {
       return quotaData();
     }
-    return quotaData().filter((account) => !hiddenAccounts().has(account.accountKey));
+    return quotaData().filter((account) => !isAccountHidden(account));
   });
 
   const loadQuota = async (forceRefresh = false) => {
@@ -268,7 +270,7 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
             {(account) => (
               <div
                 class={`overflow-hidden rounded-lg border transition-opacity ${
-                  hiddenAccounts().has(account.accountKey)
+                  isAccountHidden(account)
                     ? "border-dashed border-gray-300 opacity-60 dark:border-gray-600"
                     : "border-gray-200 dark:border-gray-700"
                 }`}
@@ -281,9 +283,11 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                     <span class="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                       {account.planType}
                     </span>
-                    <Show when={hiddenAccounts().has(account.accountKey)}>
+                    <Show when={isAccountHidden(account)}>
                       <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-gray-500 dark:bg-gray-600 dark:text-gray-300">
-                        {t("dashboard.quota.hidden")}
+                        {isCodexQuotaExhausted(account)
+                          ? t("dashboard.quota.percentUsed", { count: "100" })
+                          : t("dashboard.quota.hidden")}
                       </span>
                     </Show>
                   </div>
@@ -295,19 +299,24 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                     </Show>
                     <button
                       aria-label={
-                        hiddenAccounts().has(account.accountKey)
-                          ? t("dashboard.quota.showAccount")
-                          : t("dashboard.quota.hideAccount")
+                        isCodexQuotaExhausted(account)
+                          ? t("dashboard.quota.percentUsed", { count: "100" })
+                          : hiddenAccounts().has(account.accountKey)
+                            ? t("dashboard.quota.showAccount")
+                            : t("dashboard.quota.hideAccount")
                       }
-                      class="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+                      class="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400 dark:hover:bg-gray-600 dark:hover:text-gray-200 dark:disabled:hover:bg-transparent dark:disabled:hover:text-gray-400"
+                      disabled={isCodexQuotaExhausted(account)}
                       onClick={() => toggleAccountVisibility(account.accountKey)}
                       title={
-                        hiddenAccounts().has(account.accountKey)
-                          ? t("dashboard.quota.showAccount")
-                          : t("dashboard.quota.hideAccount")
+                        isCodexQuotaExhausted(account)
+                          ? t("dashboard.quota.percentUsed", { count: "100" })
+                          : hiddenAccounts().has(account.accountKey)
+                            ? t("dashboard.quota.showAccount")
+                            : t("dashboard.quota.hideAccount")
                       }
                     >
-                      <VisibilityIcon hidden={hiddenAccounts().has(account.accountKey)} />
+                      <VisibilityIcon hidden={isAccountHidden(account)} />
                     </button>
                   </div>
                 </div>

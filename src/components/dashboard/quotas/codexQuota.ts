@@ -25,3 +25,8 @@ export function getCodexRateLimits(account: CodexQuotaResult): CodexRateLimit[] 
 
   return limits;
 }
+
+/** An account is unavailable once any of its active quota windows is exhausted. */
+export function isCodexQuotaExhausted(account: CodexQuotaResult): boolean {
+  return getCodexRateLimits(account).some((limit) => limit.usedPercent >= 100);
+}
