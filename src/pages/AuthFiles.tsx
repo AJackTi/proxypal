@@ -3,6 +3,7 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
+import { selectFilesForDownload } from "../lib/authFiles";
 import { selectLatestGptModel } from "../lib/gptModel";
 import {
   type AuthFile,
@@ -50,6 +51,33 @@ const providerIcons: Record<string, string> = {
   qwen: "/logos/qwen.svg",
   vertex: "/logos/vertex.svg",
 };
+
+function ExpandCollapseIcon(props: { expanded: boolean }) {
+  return (
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <Show
+        fallback={
+          <>
+            <path
+              d="M7 11l5 5 5-5M7 5l5 5 5-5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+            />
+          </>
+        }
+        when={props.expanded}
+      >
+        <path
+          d="M7 13l5-5 5 5M7 19l5-5 5 5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+        />
+      </Show>
+    </svg>
+  );
+}
 
 export function AuthFilesPage() {
   const { t } = useI18n();
@@ -337,7 +365,7 @@ export function AuthFilesPage() {
   };
 
   const handleDownloadAll = async () => {
-    const authFiles = files();
+    const authFiles = selectFilesForDownload(files(), selectedIds());
     if (authFiles.length === 0 || downloadingAll()) {
       return;
     }
@@ -368,6 +396,8 @@ export function AuthFilesPage() {
       setDownloadingAll(false);
     }
   };
+
+  const downloadTargets = () => selectFilesForDownload(files(), selectedIds());
 
   const handleDeleteAll = async () => {
     try {
@@ -407,15 +437,19 @@ export function AuthFilesPage() {
     }
   };
 
-  const isExpanded = (fileId: string) => !collapsedIds().has(fileId);
+  const isExpanded = (file: AuthFile) => !file.disabled && !collapsedIds().has(file.id);
 
-  const toggleExpanded = (fileId: string) => {
+  const toggleExpanded = (file: AuthFile) => {
+    if (file.disabled) {
+      return;
+    }
+
     setCollapsedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(fileId)) {
-        next.delete(fileId);
+      if (next.has(file.id)) {
+        next.delete(file.id);
       } else {
-        next.add(fileId);
+        next.add(file.id);
       }
       return next;
     });
@@ -423,10 +457,11 @@ export function AuthFilesPage() {
 
   const toggleAllExpanded = () => {
     const visible = filteredFiles();
-    const shouldCollapse = visible.length > 0 && visible.every((file) => isExpanded(file.id));
+    const expandable = visible.filter((file) => !file.disabled);
+    const shouldCollapse = expandable.length > 0 && expandable.every((file) => isExpanded(file));
     setCollapsedIds((prev) => {
       const next = new Set(prev);
-      for (const file of visible) {
+      for (const file of expandable) {
         if (shouldCollapse) {
           next.add(file.id);
         } else {
@@ -439,7 +474,8 @@ export function AuthFilesPage() {
 
   const allVisibleExpanded = () => {
     const visible = filteredFiles();
-    return visible.length > 0 && visible.every((file) => isExpanded(file.id));
+    const expandable = visible.filter((file) => !file.disabled);
+    return expandable.length > 0 && expandable.every((file) => isExpanded(file));
   };
 
   const handleBatchDelete = async () => {
@@ -552,12 +588,20 @@ export function AuthFilesPage() {
           <div class="flex items-center gap-2">
             <Show when={files().length > 0}>
               <Button
-                aria-label={t("authFiles.actions.downloadAll")}
+                aria-label={
+                  selectedIds().size > 0
+                    ? t("authFiles.actions.downloadSelected", { count: downloadTargets().length })
+                    : t("authFiles.actions.downloadAll")
+                }
                 class="px-2 sm:px-3"
-                disabled={downloadingAll()}
+                disabled={downloadingAll() || downloadTargets().length === 0}
                 onClick={handleDownloadAll}
                 size="sm"
-                title={t("authFiles.actions.downloadAll")}
+                title={
+                  selectedIds().size > 0
+                    ? t("authFiles.actions.downloadSelected", { count: downloadTargets().length })
+                    : t("authFiles.actions.downloadAll")
+                }
                 variant="ghost"
               >
                 <svg
@@ -576,7 +620,11 @@ export function AuthFilesPage() {
                 <span class="hidden sm:inline">
                   {downloadingAll()
                     ? t("authFiles.actions.downloadingAll")
-                    : t("authFiles.actions.downloadAll")}
+                    : selectedIds().size > 0
+                      ? t("authFiles.actions.downloadSelected", {
+                          count: downloadTargets().length,
+                        })
+                      : t("authFiles.actions.downloadAll")}
                 </span>
               </Button>
               <button
@@ -593,14 +641,7 @@ export function AuthFilesPage() {
                     : t("authFiles.actions.expandAll")
                 }
               >
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    d="M8 3H5a2 2 0 00-2 2v3m13-5h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3m13 5h3a2 2 0 002-2v-3"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                  />
-                </svg>
+                <ExpandCollapseIcon expanded={allVisibleExpanded()} />
               </button>
             </Show>
             <Show when={selectedIds().size > 0}>
@@ -730,14 +771,7 @@ export function AuthFilesPage() {
                       : t("authFiles.actions.expandAll")
                   }
                 >
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      d="M8 3H5a2 2 0 00-2 2v3m13-5h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3m13 5h3a2 2 0 002-2v-3"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                    />
-                  </svg>
+                  <ExpandCollapseIcon expanded={allVisibleExpanded()} />
                   <span class="hidden sm:inline">
                     {allVisibleExpanded()
                       ? t("authFiles.actions.collapseAll")
@@ -857,7 +891,7 @@ export function AuthFilesPage() {
                               </Show>
                             </div>
 
-                            <Show when={isExpanded(file.id)}>
+                            <Show when={isExpanded(file)}>
                               <div class="mt-1.5 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                                 <Show when={file.email}>
                                   <span class="flex items-center gap-1">
@@ -999,22 +1033,23 @@ export function AuthFilesPage() {
                         {/* Right: Actions */}
                         <div class="flex shrink-0 items-center gap-1">
                           <button
-                            aria-expanded={isExpanded(file.id)}
+                            aria-expanded={isExpanded(file)}
                             aria-label={
-                              isExpanded(file.id)
+                              isExpanded(file)
                                 ? t("authFiles.actions.collapseDetails")
                                 : t("authFiles.actions.expandDetails")
                             }
-                            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                            onClick={() => toggleExpanded(file.id)}
+                            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 dark:disabled:hover:bg-transparent dark:disabled:hover:text-gray-400"
+                            disabled={file.disabled}
+                            onClick={() => toggleExpanded(file)}
                             title={
-                              isExpanded(file.id)
+                              isExpanded(file)
                                 ? t("authFiles.actions.collapseDetails")
                                 : t("authFiles.actions.expandDetails")
                             }
                           >
                             <svg
-                              class={`h-5 w-5 transition-transform ${isExpanded(file.id) ? "rotate-180" : ""}`}
+                              class={`h-5 w-5 transition-transform ${isExpanded(file) ? "rotate-180" : ""}`}
                               fill="none"
                               stroke="currentColor"
                               viewBox="0 0 24 24"

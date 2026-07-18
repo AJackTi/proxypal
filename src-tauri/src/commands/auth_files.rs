@@ -4,7 +4,38 @@ use crate::state::AppState;
 use crate::types::{self, AuthFile};
 use crate::utils::detect_provider_from_filename;
 use crate::{build_management_client, get_management_key, get_management_url};
+use std::path::{Path, PathBuf};
 use tauri::State;
+
+fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
+    let requested = Path::new(filename);
+    let basename = requested.file_name()?.to_str()?;
+    if basename != filename || basename == "." || basename == ".." {
+        return None;
+    }
+
+    let auth_dir = dirs::home_dir()?.join(".cli-proxy-api");
+    let mut candidates = vec![auth_dir.join(basename)];
+    if !basename.ends_with(".json") {
+        candidates.push(auth_dir.join(format!("{basename}.json")));
+    }
+    if !basename.ends_with(".json.disabled") {
+        candidates.push(auth_dir.join(format!("{basename}.json.disabled")));
+    }
+    Some(candidates)
+}
+
+async fn read_local_auth_file(filename: &str) -> Option<Vec<u8>> {
+    let candidates = local_auth_file_candidates(filename)?;
+    tokio::task::spawn_blocking(move || {
+        candidates
+            .into_iter()
+            .find_map(|path| std::fs::read(path).ok())
+    })
+    .await
+    .ok()
+    .flatten()
+}
 
 // Get all auth files
 #[tauri::command]
@@ -352,15 +383,14 @@ pub async fn download_auth_file(
     filename: String,
 ) -> Result<String, String> {
     let port = state.config.lock().unwrap().port;
-    let url = format!(
-        "{}?name={}",
-        get_management_url(port, "auth-files/download"),
-        filename
-    );
+    let url = get_management_url(port, "auth-files/download");
 
     let client = build_management_client();
     let response = client
         .get(&url)
+        // Auth filenames may contain `+` (for example in email addresses).
+        // Encode the query via reqwest so `+` is not decoded as a space.
+        .query(&[("name", filename.as_str())])
         .header("X-Management-Key", &get_management_key())
         .send()
         .await
@@ -368,6 +398,19 @@ pub async fn download_auth_file(
 
     if !response.status().is_success() {
         let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            if let Some(bytes) = read_local_auth_file(&filename).await {
+                let downloads_dir =
+                    dirs::download_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default());
+                let dest_path = downloads_dir.join(&filename);
+                let write_path = dest_path.clone();
+                tokio::task::spawn_blocking(move || std::fs::write(write_path, bytes))
+                    .await
+                    .map_err(|e| format!("Failed to save file: {}", e))?
+                    .map_err(|e| format!("Failed to save file: {}", e))?;
+                return Ok(dest_path.to_string_lossy().to_string());
+            }
+        }
         let text = response.text().await.unwrap_or_default();
         return Err(format!(
             "Failed to download auth file: {} - {}",
@@ -382,7 +425,11 @@ pub async fn download_auth_file(
         dirs::download_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default());
 
     let dest_path = downloads_dir.join(&filename);
-    std::fs::write(&dest_path, &bytes).map_err(|e| format!("Failed to save file: {}", e))?;
+    let write_path = dest_path.clone();
+    tokio::task::spawn_blocking(move || std::fs::write(write_path, bytes))
+        .await
+        .map_err(|e| format!("Failed to save file: {}", e))?
+        .map_err(|e| format!("Failed to save file: {}", e))?;
 
     Ok(dest_path.to_string_lossy().to_string())
 }
@@ -492,6 +539,27 @@ pub async fn batch_delete_auth_files(
         "errors": errors,
         "method": "sequential"
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_auth_file_candidates;
+
+    #[test]
+    fn local_candidates_reject_path_traversal() {
+        assert!(local_auth_file_candidates("../secret.json").is_none());
+    }
+
+    #[test]
+    fn local_candidates_include_disabled_file_variant() {
+        let candidates = local_auth_file_candidates("codex-account").unwrap();
+        assert!(candidates
+            .iter()
+            .any(|path| path.ends_with("codex-account.json")));
+        assert!(candidates
+            .iter()
+            .any(|path| path.ends_with("codex-account.json.disabled")));
+    }
 }
 
 // ==========================================================================

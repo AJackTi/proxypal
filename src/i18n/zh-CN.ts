@@ -224,6 +224,7 @@ export const zhCN = {
       disable: "禁用",
       download: "下载",
       downloadAll: "全部下载",
+      downloadSelected: "下载选中项（{{count}}）",
       downloadingAll: "下载中...",
       enable: "启用",
       expandAll: "全部展开",

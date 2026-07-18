@@ -226,6 +226,7 @@ export const en = {
       disable: "Disable",
       download: "Download",
       downloadAll: "Download All",
+      downloadSelected: "Download selected ({{count}})",
       downloadingAll: "Downloading...",
       enable: "Enable",
       expandAll: "Expand all",

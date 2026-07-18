@@ -226,6 +226,7 @@ export const vi = {
       disable: "Tắt",
       download: "Tải xuống",
       downloadAll: "Tải xuống tất cả",
+      downloadSelected: "Tải xuống đã chọn ({{count}})",
       downloadingAll: "Đang tải xuống...",
       enable: "Bật",
       expandAll: "Mở rộng tất cả",
