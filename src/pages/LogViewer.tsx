@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
-import { scrollLogContainerToLatest } from "../lib/logViewer";
+import { getLatestLogsForDisplay, scrollLogContainerToNewest } from "../lib/logViewer";
 import {
   clearLogs,
   getLogs,
@@ -40,7 +40,7 @@ export function LogViewerPage() {
   const [search, setSearch] = createSignal("");
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
   const [displayLimit, setDisplayLimit] = createSignal(DISPLAY_CHUNK_SIZE);
-  const [scrollToLatest, setScrollToLatest] = createSignal(false);
+  const [scrollToNewest, setScrollToNewest] = createSignal(false);
 
   // Error logs state
   const [errorLogFiles, setErrorLogFiles] = createSignal<string[]>([]);
@@ -111,7 +111,7 @@ export function LogViewerPage() {
     setLoading(true);
     try {
       const result = await getLogs(INITIAL_LOG_FETCH);
-      setScrollToLatest(true);
+      setScrollToNewest(true);
       setLogs(result);
       setDisplayLimit(DISPLAY_CHUNK_SIZE); // Reset display limit on fresh load
     } catch (error) {
@@ -144,29 +144,25 @@ export function LogViewerPage() {
   const displayedLogs = createMemo(() => {
     const all = filteredLogs();
     const limit = displayLimit();
-    // Show most recent logs (end of array), up to limit
-    if (all.length <= limit) {
-      return all;
-    }
-    return all.slice(-limit);
+    return getLatestLogsForDisplay(all, limit);
   });
 
   // Scroll only after Solid has rendered the refreshed log list. Calling this
   // directly after setLogs can race the DOM update and leave the viewport at the top.
   createEffect(() => {
-    if (!scrollToLatest()) {
+    if (!scrollToNewest()) {
       return;
     }
 
     const hasLogs = displayedLogs().length > 0;
     if (!hasLogs) {
-      setScrollToLatest(false);
+      setScrollToNewest(false);
       return;
     }
 
     requestAnimationFrame(() => {
-      scrollLogContainerToLatest(logContainerRef);
-      setScrollToLatest(false);
+      scrollLogContainerToNewest(logContainerRef);
+      setScrollToNewest(false);
     });
   });
 
@@ -539,20 +535,6 @@ export function LogViewerPage() {
                   when={filteredLogs().length > 0}
                 >
                   <div class="space-y-0.5 p-2">
-                    {/* Load more button at top */}
-                    <Show when={hasMoreLogs()}>
-                      <div class="py-2 text-center">
-                        <button
-                          class="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                          onClick={loadMoreLogs}
-                        >
-                          {t("logs.loadOlderPrefix")}{" "}
-                          {Math.min(DISPLAY_CHUNK_SIZE, filteredLogs().length - displayLimit())}{" "}
-                          {t("logs.loadOlderMiddle")} ({filteredLogs().length - displayLimit()}{" "}
-                          {t("logs.remaining")})
-                        </button>
-                      </div>
-                    </Show>
                     <For each={displayedLogs()}>
                       {(log) => (
                         <div class="group flex items-start gap-2 rounded px-2 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -579,6 +561,20 @@ export function LogViewerPage() {
                         </div>
                       )}
                     </For>
+                    {/* Older logs are appended below the newest entries. */}
+                    <Show when={hasMoreLogs()}>
+                      <div class="py-2 text-center">
+                        <button
+                          class="text-xs font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                          onClick={loadMoreLogs}
+                        >
+                          {t("logs.loadOlderPrefix")}{" "}
+                          {Math.min(DISPLAY_CHUNK_SIZE, filteredLogs().length - displayLimit())}{" "}
+                          {t("logs.loadOlderMiddle")} ({filteredLogs().length - displayLimit()}{" "}
+                          {t("logs.remaining")})
+                        </button>
+                      </div>
+                    </Show>
                   </div>
                 </Show>
               </Show>
