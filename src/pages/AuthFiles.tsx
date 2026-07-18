@@ -3,13 +3,16 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
+import { selectLatestGptModel } from "../lib/gptModel";
 import {
   type AuthFile,
   batchDeleteAuthFiles,
   deleteAllAuthFiles,
   deleteAuthFile,
   downloadAuthFile,
+  getAvailableModels,
   getAuthFiles,
+  getGptReasoningModels,
   refreshAuthStatus,
   toggleAuthFile,
   uploadAuthFile,
@@ -203,13 +206,15 @@ export function AuthFilesPage() {
       return;
     }
 
+    setTestingProvider(file.name);
+
     // Determine a model to test with based on provider.
     // Keys match CLIProxyAPI's canonical Auth.Provider values;
     // "gemini-cli" also handled via the "gemini" prefix lookup below.
     const providerTestModels: Record<string, string> = {
       antigravity: "gemini-2.5-flash",
       claude: "claude-sonnet-4-5",
-      codex: "gpt-5.1-codex-mini",
+      codex: "gpt-5.5",
       deepseek: "deepseek-chat",
       gemini: "gemini-2.5-flash",
       iflow: "glm-4.5",
@@ -217,12 +222,26 @@ export function AuthFilesPage() {
       qwen: "qwen3-coder-plus",
       vertex: "gemini-2.5-flash",
     };
-    const modelId =
+    let modelId =
       providerTestModels[p] ??
       Object.entries(providerTestModels).find(([key]) => p.includes(key))?.[1] ??
       null;
 
+    if (p.includes("codex")) {
+      try {
+        const availableModels = await getAvailableModels();
+        const supportedGptModels = await getGptReasoningModels();
+        modelId =
+          selectLatestGptModel(availableModels.map((model) => model.id)) ??
+          selectLatestGptModel(supportedGptModels) ??
+          modelId;
+      } catch (error) {
+        console.warn("Failed to resolve latest GPT model; using fallback:", error);
+      }
+    }
+
     if (!modelId) {
+      setTestingProvider(null);
       toastStore.error(
         t("authFiles.toasts.unknownProviderCannotDetermineTestModel", {
           provider: file.provider,
@@ -231,7 +250,6 @@ export function AuthFilesPage() {
       return;
     }
 
-    setTestingProvider(file.name);
     try {
       const { testProviderConnection } = await import("../lib/tauri");
       const result = await testProviderConnection(modelId);
