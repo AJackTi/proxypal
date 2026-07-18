@@ -1,4 +1,5 @@
 import { createSignal, createEffect, onCleanup, Show, For } from "solid-js";
+import { calculateSuccessRate } from "../lib/analytics";
 import { getUsageStats, type UsageStats } from "../lib/tauri";
 import { appStore } from "../stores/app";
 
@@ -127,10 +128,7 @@ export function UsageSummary() {
 
   const successRate = () => {
     const s = stats();
-    if (!s || s.totalRequests === 0) {
-      return 100;
-    }
-    return Math.round((s.successCount / s.totalRequests) * 100);
+    return calculateSuccessRate(s?.successCount ?? 0, s?.totalRequests ?? 0);
   };
 
   const hasStats = () => {

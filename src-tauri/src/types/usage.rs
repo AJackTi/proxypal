@@ -135,6 +135,38 @@ impl Default for Aggregate {
     }
 }
 
+impl Aggregate {
+    /// Keep request totals consistent with the classified success/failure counters.
+    pub fn reconcile_request_counts(&mut self) -> bool {
+        let classified_requests = self
+            .total_success_count
+            .saturating_add(self.total_failure_count);
+        if classified_requests > 0 && self.total_requests != classified_requests {
+            self.total_requests = classified_requests;
+            return true;
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+mod aggregate_tests {
+    use super::Aggregate;
+
+    #[test]
+    fn reconciles_inconsistent_request_totals() {
+        let mut aggregate = Aggregate {
+            total_failure_count: 306,
+            total_requests: 19_587,
+            total_success_count: 19_697,
+            ..Aggregate::default()
+        };
+
+        assert!(aggregate.reconcile_request_counts());
+        assert_eq!(aggregate.total_requests, 20_003);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestHistory {

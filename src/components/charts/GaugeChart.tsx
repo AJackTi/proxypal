@@ -1,4 +1,5 @@
 import { createMemo } from "solid-js";
+import { clampPercentage } from "../../lib/analytics";
 import { EChartsWrapper } from "./EChartsWrapper";
 
 import type { EChartsOption } from "echarts";
@@ -10,6 +11,7 @@ interface GaugeChartProps {
 }
 
 export function GaugeChart(props: GaugeChartProps) {
+  const normalizedValue = createMemo(() => clampPercentage(props.value));
   const getColor = (value: number) => {
     if (value >= 95) {
       return "#10b981";
@@ -58,11 +60,11 @@ export function GaugeChart(props: GaugeChartProps) {
           data: [
             {
               name: props.title || "Success Rate",
-              value: props.value,
+              value: normalizedValue(),
             },
           ],
           detail: {
-            color: getColor(props.value),
+            color: getColor(normalizedValue()),
             fontSize: 28,
             fontWeight: "bold",
             formatter: (value: number) => `${value.toFixed(1)}%`,
@@ -75,7 +77,7 @@ export function GaugeChart(props: GaugeChartProps) {
           pointer: {
             icon: "path://M12.8,0.7l12,40.1H0.7L12.8,0.7z",
             itemStyle: {
-              color: getColor(props.value),
+              color: getColor(normalizedValue()),
             },
             length: "60%",
             offsetCenter: [0, "-10%"],

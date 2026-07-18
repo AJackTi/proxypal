@@ -11,6 +11,7 @@ import {
   type HeatmapData,
 } from "../components/charts";
 import { useI18n } from "../i18n";
+import { calculateSuccessRate } from "../lib/analytics";
 import { exportUsageStats, getUsageStats, importUsageStats, type UsageStats } from "../lib/tauri";
 import { toastStore } from "../stores/toast";
 
@@ -509,10 +510,7 @@ export function Analytics() {
 
   const successRate = () => {
     const s = stats();
-    if (!s || s.totalRequests === 0) {
-      return 100;
-    }
-    return Math.round((s.successCount / s.totalRequests) * 100);
+    return calculateSuccessRate(s?.successCount ?? 0, s?.totalRequests ?? 0);
   };
 
   const maxModelRequests = () => {

@@ -42,7 +42,10 @@ pub(crate) fn load_aggregate() -> Aggregate {
     let path = get_aggregate_path();
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(agg) = serde_json::from_str(&data) {
+            if let Ok(mut agg) = serde_json::from_str::<Aggregate>(&data) {
+                if agg.reconcile_request_counts() {
+                    let _ = save_aggregate(&agg);
+                }
                 return agg;
             }
         }
