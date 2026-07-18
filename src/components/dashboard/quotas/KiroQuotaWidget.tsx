@@ -2,6 +2,7 @@ import { createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { fetchKiroQuota, type KiroQuotaResult } from "../../../lib/tauri";
+import { countKiroAccounts } from "./kiroQuota";
 
 // Kiro Quota Widget - shows agentic AI credits for Kiro accounts
 export function KiroQuotaWidget() {
@@ -9,6 +10,7 @@ export function KiroQuotaWidget() {
   const [quotaData, setQuotaData] = createSignal<KiroQuotaResult[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [expanded, setExpanded] = createSignal(false);
+  const accountCount = () => countKiroAccounts(quotaData());
 
   const loadQuota = async (forceRefresh = false) => {
     setLoading(true);
@@ -38,10 +40,10 @@ export function KiroQuotaWidget() {
           <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
             {t("dashboard.kiro.title")}
           </span>
-          <Show when={quotaData().length > 0}>
+          <Show when={accountCount() > 0}>
             <span class="text-xs text-gray-500 dark:text-gray-400">
               {t("dashboard.antigravity.accountsCount", {
-                count: quotaData().length,
+                count: accountCount(),
               })}
             </span>
           </Show>
