@@ -12,6 +12,7 @@ import {
 } from "../components/charts";
 import { useI18n } from "../i18n";
 import { calculateSuccessRate } from "../lib/analytics";
+import { formatCompactNumber } from "../lib/numberFormat";
 import { exportUsageStats, getUsageStats, importUsageStats, type UsageStats } from "../lib/tauri";
 import { toastStore } from "../stores/toast";
 
@@ -32,13 +33,7 @@ function formatNumber(num: number): string {
 }
 
 function formatTokens(num: number): string {
-  if (num >= 1_000_000) {
-    return (num / 1_000_000).toFixed(2) + "M";
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1) + "K";
-  }
-  return num.toLocaleString();
+  return formatCompactNumber(num);
 }
 
 function formatLabel(label: string, range: TimeRange): string {
@@ -102,9 +97,13 @@ function LineChart(props: {
   getData: () => number[];
   getLabels: () => string[];
   label: string;
+  valueFormatter?: (value: number) => string;
 }) {
   let canvasRef: HTMLCanvasElement | undefined;
   let chartInstance: Chart | null = null;
+  const setCanvasRef = (element: HTMLCanvasElement) => {
+    canvasRef = element;
+  };
 
   const isDark = () => document.documentElement.classList.contains("dark");
 
@@ -123,6 +122,7 @@ function LineChart(props: {
 
     const labels = props.getLabels().slice(-50);
     const data = props.getData().slice(-50);
+    const formatValue = props.valueFormatter ?? formatCompactNumber;
 
     chartInstance = new Chart(canvasRef, {
       data: {
@@ -159,6 +159,9 @@ function LineChart(props: {
             bodyColor: isDark() ? "#D1D5DB" : "#4B5563",
             borderColor: isDark() ? "#374151" : "#E5E7EB",
             borderWidth: 1,
+            callbacks: {
+              label: (context) => `${props.label}: ${formatValue(Number(context.parsed.y ?? 0))}`,
+            },
             cornerRadius: 8,
             intersect: false,
             mode: "index",
@@ -184,6 +187,7 @@ function LineChart(props: {
               color: gridColor,
             },
             ticks: {
+              callback: (value) => formatValue(Number(value)),
               color: textColor,
             },
           },
@@ -224,7 +228,7 @@ function LineChart(props: {
     }
   });
 
-  return <canvas class="h-full w-full" ref={canvasRef} />;
+  return <canvas class="h-full w-full" ref={setCanvasRef} />;
 }
 
 // Summary stat card component
@@ -953,6 +957,7 @@ export function Analytics() {
                       getData={() => tokensChartData().data}
                       getLabels={() => tokensChartData().labels}
                       label={t("analytics.tokens")}
+                      valueFormatter={formatCompactNumber}
                     />
                   </div>
                 </div>
