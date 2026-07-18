@@ -232,6 +232,7 @@ export function AuthFilesPage() {
         toastStore.error(t("authFiles.toasts.testFailed"), String(error));
       } finally {
         setTestingProvider(null);
+        await loadFiles();
       }
       return;
     }
@@ -298,6 +299,7 @@ export function AuthFilesPage() {
       toastStore.error(t("authFiles.toasts.testFailed"), message);
     } finally {
       setTestingProvider(null);
+      await loadFiles();
     }
   };
 
