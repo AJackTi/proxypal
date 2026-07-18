@@ -229,22 +229,27 @@ pub fn run() {
     // Migrate old format to split storage on first run
     migrate_to_split_storage();
 
-    // Clean up any orphaned clipproxyapi processes from previous crashes
-    #[cfg(unix)]
-    {
-        println!("[ProxyPal] Cleaning up orphaned clipproxyapi processes on startup");
-        let _ = std::process::Command::new("sh")
-            .args(["-c", "pkill -9 -f clipproxyapi 2>/dev/null"])
-            .spawn()
-            .and_then(|mut child| child.wait());
-    }
-    #[cfg(windows)]
-    {
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "taskkill /F /IM clipproxyapi*.exe 2>nul"]);
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = cmd.spawn().and_then(|mut child| child.wait());
+    // Clean up orphaned processes unless this instance is intentionally sharing a
+    // running proxy with another ProxyPal instance (for example, a verification build).
+    if std::env::var_os("PROXYPAL_SKIP_ORPHAN_CLEANUP").is_none() {
+        #[cfg(unix)]
+        {
+            println!("[ProxyPal] Cleaning up orphaned clipproxyapi processes on startup");
+            let _ = std::process::Command::new("sh")
+                .args(["-c", "pkill -9 -f clipproxyapi 2>/dev/null"])
+                .spawn()
+                .and_then(|mut child| child.wait());
+        }
+        #[cfg(windows)]
+        {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", "taskkill /F /IM clipproxyapi*.exe 2>nul"]);
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            let _ = cmd.spawn().and_then(|mut child| child.wait());
+        }
+    } else {
+        println!("[ProxyPal] Skipping orphan cleanup for shared-proxy verification mode");
     }
 
     // Load persisted config and auth
