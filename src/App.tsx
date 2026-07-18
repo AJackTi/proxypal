@@ -3,6 +3,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar } from "./components/Sidebar";
 import { ToastContainer } from "./components/ui";
 import { useI18n } from "./i18n";
+import { isSidebarWide } from "./lib/sidebarLayout";
 import {
   AnalyticsPage,
   ApiKeysPage,
@@ -17,6 +18,8 @@ import { themeStore } from "./stores/theme";
 function App() {
   const { currentPage, initialize, isInitialized, setCurrentPage } = appStore;
   const { t } = useI18n();
+  const sidebarOpen = () =>
+    isSidebarWide(appStore.config().sidebarPinned, appStore.sidebarExpanded());
 
   onMount(() => {
     initialize();
@@ -59,8 +62,8 @@ function App() {
           <Sidebar />
           <div
             classList={{
-              "pl-16": !appStore.sidebarExpanded(),
-              "pl-48": appStore.sidebarExpanded(),
+              "pl-16": !sidebarOpen(),
+              "pl-48": sidebarOpen(),
             }}
           >
             <Switch fallback={<DashboardPage />}>

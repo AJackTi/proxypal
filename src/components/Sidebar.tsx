@@ -1,5 +1,6 @@
-import { type Component, createEffect, createSignal, For, onMount, Show } from "solid-js";
+import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../i18n";
+import { isSidebarWide } from "../lib/sidebarLayout";
 import { checkForUpdates, downloadAndInstallUpdate, saveConfig } from "../lib/tauri";
 import { appStore } from "../stores/app";
 import { themeStore } from "../stores/theme";
@@ -85,19 +86,7 @@ export const Sidebar: Component = () => {
   const { t } = useI18n();
   const { currentPage, proxyStatus, setCurrentPage, setSidebarExpanded, sidebarExpanded } =
     appStore;
-  const [isPinned, setIsPinned] = createSignal(appStore.config().sidebarPinned || false);
-
-  // Persist pinned state
-  createEffect(() => {
-    const pinned = isPinned();
-    if (appStore.config().sidebarPinned !== pinned) {
-      appStore.setConfig({
-        ...appStore.config(),
-        sidebarPinned: pinned,
-      });
-      saveConfig(appStore.config());
-    }
-  });
+  const isPinned = () => Boolean(appStore.config().sidebarPinned);
 
   const [updateAvailable, setUpdateAvailable] = createSignal(false);
   const [updateVersion, setUpdateVersion] = createSignal("");
@@ -130,7 +119,7 @@ export const Sidebar: Component = () => {
     }
   };
 
-  const isExpanded = () => isPinned() || sidebarExpanded();
+  const isExpanded = () => isSidebarWide(isPinned(), sidebarExpanded());
 
   const isActive = (id: PageId) => {
     const page = currentPage();
@@ -151,8 +140,12 @@ export const Sidebar: Component = () => {
 
   const togglePin = () => {
     const newState = !isPinned();
-    setIsPinned(newState);
+    const nextConfig = { ...appStore.config(), sidebarPinned: newState };
+    appStore.setConfig(nextConfig);
     setSidebarExpanded(newState);
+    void saveConfig(nextConfig).catch((error) => {
+      console.error("Failed to save sidebar pin state:", error);
+    });
   };
 
   const getNavLabel = (id: PageId) => {
