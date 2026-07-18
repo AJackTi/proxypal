@@ -62,6 +62,8 @@ export function AuthFilesPage() {
   const [testingProvider, setTestingProvider] = createSignal<string | null>(null);
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = createSignal(false);
+  const [collapsedIds, setCollapsedIds] = createSignal<Set<string>>(new Set());
+  const [downloadingAll, setDownloadingAll] = createSignal(false);
 
   // Load auth files on mount and when proxy status changes
   createEffect(() => {
@@ -334,6 +336,39 @@ export function AuthFilesPage() {
     }
   };
 
+  const handleDownloadAll = async () => {
+    const authFiles = files();
+    if (authFiles.length === 0 || downloadingAll()) {
+      return;
+    }
+
+    setDownloadingAll(true);
+    let downloaded = 0;
+    const errors: string[] = [];
+    try {
+      for (const file of authFiles) {
+        try {
+          await downloadAuthFile(file.id, file.name);
+          downloaded++;
+        } catch (error) {
+          errors.push(`${file.name}: ${String(error)}`);
+        }
+      }
+
+      if (downloaded > 0) {
+        toastStore.success(t("authFiles.toasts.batchDownloadSucceeded", { count: downloaded }));
+      }
+      if (errors.length > 0) {
+        toastStore.error(
+          t("authFiles.toasts.batchDownloadErrors", { count: errors.length }),
+          errors.join("; "),
+        );
+      }
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   const handleDeleteAll = async () => {
     try {
       await deleteAllAuthFiles();
@@ -370,6 +405,41 @@ export function AuthFilesPage() {
     } else {
       setSelectedIds(new Set<string>(visible.map((f) => f.id)));
     }
+  };
+
+  const isExpanded = (fileId: string) => !collapsedIds().has(fileId);
+
+  const toggleExpanded = (fileId: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllExpanded = () => {
+    const visible = filteredFiles();
+    const shouldCollapse = visible.length > 0 && visible.every((file) => isExpanded(file.id));
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      for (const file of visible) {
+        if (shouldCollapse) {
+          next.add(file.id);
+        } else {
+          next.delete(file.id);
+        }
+      }
+      return next;
+    });
+  };
+
+  const allVisibleExpanded = () => {
+    const visible = filteredFiles();
+    return visible.length > 0 && visible.every((file) => isExpanded(file.id));
   };
 
   const handleBatchDelete = async () => {
@@ -480,6 +550,59 @@ export function AuthFilesPage() {
           </div>
 
           <div class="flex items-center gap-2">
+            <Show when={files().length > 0}>
+              <Button
+                aria-label={t("authFiles.actions.downloadAll")}
+                class="px-2 sm:px-3"
+                disabled={downloadingAll()}
+                onClick={handleDownloadAll}
+                size="sm"
+                title={t("authFiles.actions.downloadAll")}
+                variant="ghost"
+              >
+                <svg
+                  class={`mr-1.5 h-4 w-4 ${downloadingAll() ? "animate-bounce" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+                <span class="hidden sm:inline">
+                  {downloadingAll()
+                    ? t("authFiles.actions.downloadingAll")
+                    : t("authFiles.actions.downloadAll")}
+                </span>
+              </Button>
+              <button
+                aria-label={
+                  allVisibleExpanded()
+                    ? t("authFiles.actions.collapseAll")
+                    : t("authFiles.actions.expandAll")
+                }
+                class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 sm:hidden"
+                onClick={toggleAllExpanded}
+                title={
+                  allVisibleExpanded()
+                    ? t("authFiles.actions.collapseAll")
+                    : t("authFiles.actions.expandAll")
+                }
+              >
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    d="M8 3H5a2 2 0 00-2 2v3m13-5h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3m13 5h3a2 2 0 002-2v-3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+              </button>
+            </Show>
             <Show when={selectedIds().size > 0}>
               <Button
                 class="text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
@@ -598,6 +721,29 @@ export function AuthFilesPage() {
                     </button>
                   )}
                 </For>
+                <button
+                  class="ml-auto hidden items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 sm:flex"
+                  onClick={toggleAllExpanded}
+                  title={
+                    allVisibleExpanded()
+                      ? t("authFiles.actions.collapseAll")
+                      : t("authFiles.actions.expandAll")
+                  }
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      d="M8 3H5a2 2 0 00-2 2v3m13-5h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3m13 5h3a2 2 0 002-2v-3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                  </svg>
+                  <span class="hidden sm:inline">
+                    {allVisibleExpanded()
+                      ? t("authFiles.actions.collapseAll")
+                      : t("authFiles.actions.expandAll")}
+                  </span>
+                </button>
               </div>
             </Show>
 
@@ -711,72 +857,10 @@ export function AuthFilesPage() {
                               </Show>
                             </div>
 
-                            <div class="mt-1.5 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
-                              <Show when={file.email}>
-                                <span class="flex items-center gap-1">
-                                  <svg
-                                    class="h-3.5 w-3.5"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                                      stroke-linecap="round"
-                                      stroke-linejoin="round"
-                                      stroke-width="2"
-                                    />
-                                  </svg>
-                                  {file.email}
-                                </span>
-                              </Show>
-                              <Show when={file.size}>
-                                <span>{formatSize(file.size)}</span>
-                              </Show>
-                              <Show when={file.modtime}>
-                                <span>{formatDate(file.modtime)}</span>
-                              </Show>
-                            </div>
-
-                            {/* Note from auth file metadata (v6.8.55+) */}
-                            <Show when={file.note}>
-                              <div class="mt-1.5 flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
-                                <svg
-                                  class="h-3.5 w-3.5 shrink-0"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                  />
-                                </svg>
-                                <span class="italic">{file.note}</span>
-                              </div>
-                            </Show>
-
-                            <Show when={file.statusMessage}>
-                              <div class="mt-2 text-sm text-red-600 dark:text-red-400">
-                                {file.statusMessage}
-                              </div>
-                            </Show>
-
-                            <div class="mt-4 flex items-center gap-2">
-                              <button
-                                class={`transition-smooth flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
-                                  testingProvider() === file.name
-                                    ? "cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-700"
-                                    : "border border-brand-200/50 bg-brand-50 text-brand-600 hover:bg-brand-100 dark:border-brand-800/50 dark:bg-brand-900/20 dark:text-brand-400 dark:hover:bg-brand-900/30"
-                                }`}
-                                disabled={testingProvider() === file.name || file.disabled}
-                                onClick={() => handleTestConnection(file)}
-                                type="button"
-                              >
-                                <Show
-                                  fallback={
+                            <Show when={isExpanded(file.id)}>
+                              <div class="mt-1.5 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+                                <Show when={file.email}>
+                                  <span class="flex items-center gap-1">
                                     <svg
                                       class="h-3.5 w-3.5"
                                       fill="none"
@@ -784,72 +868,165 @@ export function AuthFilesPage() {
                                       viewBox="0 0 24 24"
                                     >
                                       <path
-                                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
                                       />
                                     </svg>
-                                  }
-                                  when={testingProvider() === file.name}
-                                >
+                                    {file.email}
+                                  </span>
+                                </Show>
+                                <Show when={file.size}>
+                                  <span>{formatSize(file.size)}</span>
+                                </Show>
+                                <Show when={file.modtime}>
+                                  <span>{formatDate(file.modtime)}</span>
+                                </Show>
+                              </div>
+
+                              {/* Note from auth file metadata (v6.8.55+) */}
+                              <Show when={file.note}>
+                                <div class="mt-1.5 flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
                                   <svg
-                                    class="h-3.5 w-3.5 animate-spin"
+                                    class="h-3.5 w-3.5 shrink-0"
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
                                   >
-                                    <circle
-                                      class="opacity-25"
-                                      cx="12"
-                                      cy="12"
-                                      r="10"
-                                      stroke="currentColor"
-                                      stroke-width="4"
-                                    />
                                     <path
-                                      class="opacity-75"
-                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                      fill="currentColor"
+                                      d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+                                      stroke-linecap="round"
+                                      stroke-linejoin="round"
+                                      stroke-width="2"
                                     />
                                   </svg>
-                                </Show>
-                                {testingProvider() === file.name
-                                  ? t("authFiles.actions.testing")
-                                  : t("authFiles.actions.testConnection")}
-                              </button>
-                            </div>
+                                  <span class="italic">{file.note}</span>
+                                </div>
+                              </Show>
 
-                            {/* Stats */}
-                            <Show
-                              when={
-                                file.successCount !== undefined || file.failureCount !== undefined
-                              }
-                            >
-                              <div class="mt-2 flex items-center gap-4 text-xs">
-                                <Show when={file.successCount !== undefined}>
-                                  <span class="text-green-600 dark:text-green-400">
-                                    {t("authFiles.stats.successCount", {
-                                      count: file.successCount || 0,
-                                    })}
-                                  </span>
-                                </Show>
-                                <Show
-                                  when={file.failureCount !== undefined && file.failureCount > 0}
+                              <Show when={file.statusMessage}>
+                                <div class="mt-2 text-sm text-red-600 dark:text-red-400">
+                                  {file.statusMessage}
+                                </div>
+                              </Show>
+
+                              <div class="mt-4 flex items-center gap-2">
+                                <button
+                                  class={`transition-smooth flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
+                                    testingProvider() === file.name
+                                      ? "cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-700"
+                                      : "border border-brand-200/50 bg-brand-50 text-brand-600 hover:bg-brand-100 dark:border-brand-800/50 dark:bg-brand-900/20 dark:text-brand-400 dark:hover:bg-brand-900/30"
+                                  }`}
+                                  disabled={testingProvider() === file.name || file.disabled}
+                                  onClick={() => handleTestConnection(file)}
+                                  type="button"
                                 >
-                                  <span class="text-red-600 dark:text-red-400">
-                                    {t("authFiles.stats.failedCount", {
-                                      count: file.failureCount || 0,
-                                    })}
-                                  </span>
-                                </Show>
+                                  <Show
+                                    fallback={
+                                      <svg
+                                        class="h-3.5 w-3.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path
+                                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                          stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                          stroke-width="2"
+                                        />
+                                      </svg>
+                                    }
+                                    when={testingProvider() === file.name}
+                                  >
+                                    <svg
+                                      class="h-3.5 w-3.5 animate-spin"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <circle
+                                        class="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        stroke-width="4"
+                                      />
+                                      <path
+                                        class="opacity-75"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                        fill="currentColor"
+                                      />
+                                    </svg>
+                                  </Show>
+                                  {testingProvider() === file.name
+                                    ? t("authFiles.actions.testing")
+                                    : t("authFiles.actions.testConnection")}
+                                </button>
                               </div>
+
+                              {/* Stats */}
+                              <Show
+                                when={
+                                  file.successCount !== undefined || file.failureCount !== undefined
+                                }
+                              >
+                                <div class="mt-2 flex items-center gap-4 text-xs">
+                                  <Show when={file.successCount !== undefined}>
+                                    <span class="text-green-600 dark:text-green-400">
+                                      {t("authFiles.stats.successCount", {
+                                        count: file.successCount || 0,
+                                      })}
+                                    </span>
+                                  </Show>
+                                  <Show
+                                    when={file.failureCount !== undefined && file.failureCount > 0}
+                                  >
+                                    <span class="text-red-600 dark:text-red-400">
+                                      {t("authFiles.stats.failedCount", {
+                                        count: file.failureCount || 0,
+                                      })}
+                                    </span>
+                                  </Show>
+                                </div>
+                              </Show>
                             </Show>
                           </div>
                         </div>
 
                         {/* Right: Actions */}
                         <div class="flex shrink-0 items-center gap-1">
+                          <button
+                            aria-expanded={isExpanded(file.id)}
+                            aria-label={
+                              isExpanded(file.id)
+                                ? t("authFiles.actions.collapseDetails")
+                                : t("authFiles.actions.expandDetails")
+                            }
+                            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                            onClick={() => toggleExpanded(file.id)}
+                            title={
+                              isExpanded(file.id)
+                                ? t("authFiles.actions.collapseDetails")
+                                : t("authFiles.actions.expandDetails")
+                            }
+                          >
+                            <svg
+                              class={`h-5 w-5 transition-transform ${isExpanded(file.id) ? "rotate-180" : ""}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                d="M19 9l-7 7-7-7"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                              />
+                            </svg>
+                          </button>
                           <button
                             class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                             onClick={() => handleDownload(file)}
