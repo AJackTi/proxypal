@@ -16,8 +16,8 @@ export interface AntigravityQuotaResult {
 }
 
 export interface CodexQuotaResult {
-  accountKey: string;
   accountEmail: string;
+  accountKey: string;
   creditsBalance?: number;
   creditsUnlimited: boolean;
   error?: string;

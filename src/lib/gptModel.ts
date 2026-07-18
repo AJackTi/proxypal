@@ -32,10 +32,20 @@ function parseGptVersion(modelId: string): { major: number; minor: number } {
 }
 
 function variantRank(modelId: string): number {
-  if (/^gpt-\d+(?:\.\d+)?$/.test(modelId)) return 0;
-  if (modelId.includes("-codex")) return 1;
-  if (modelId.includes("-fast")) return 2;
-  if (modelId.includes("-mini")) return 3;
-  if (modelId.includes("-nano")) return 4;
+  if (/^gpt-\d+(?:\.\d+)?$/.test(modelId)) {
+    return 0;
+  }
+  if (modelId.includes("-codex")) {
+    return 1;
+  }
+  if (modelId.includes("-fast")) {
+    return 2;
+  }
+  if (modelId.includes("-mini")) {
+    return 3;
+  }
+  if (modelId.includes("-nano")) {
+    return 4;
+  }
   return 5;
 }

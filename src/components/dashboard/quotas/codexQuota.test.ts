@@ -4,8 +4,8 @@ import { getCodexRateLimits } from "./codexQuota";
 import type { CodexQuotaResult } from "../../../lib/tauri";
 
 const baseAccount: CodexQuotaResult = {
-  accountKey: "codex-codex@example.com.json",
   accountEmail: "codex@example.com",
+  accountKey: "codex-codex@example.com.json",
   creditsUnlimited: false,
   fetchedAt: "2026-07-18T00:00:00Z",
   hasCredits: false,

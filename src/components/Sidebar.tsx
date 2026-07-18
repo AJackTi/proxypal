@@ -145,6 +145,7 @@ export const Sidebar: Component = () => {
     setSidebarExpanded(newState);
     void saveConfig(nextConfig).catch((error) => {
       console.error("Failed to save sidebar pin state:", error);
+      toastStore.error(t("settings.toasts.failedToSave"), String(error));
     });
   };
 

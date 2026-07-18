@@ -34,4 +34,19 @@ describe("countKiroAccounts", () => {
   it("counts successful quota responses", () => {
     expect(countKiroAccounts([quotaResult])).toBe(1);
   });
+
+  it("does not count a signed-out CLI response without an error field", () => {
+    expect(
+      countKiroAccounts([
+        {
+          ...quotaResult,
+          accountEmail: "Kiro Account",
+          plan: "Unknown",
+          totalCredits: 0,
+          usedCredits: 0,
+          usedPercent: 0,
+        },
+      ]),
+    ).toBe(0);
+  });
 });
