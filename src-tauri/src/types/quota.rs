@@ -45,6 +45,8 @@ pub struct AntigravityQuotaResult {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexQuotaResult {
+    /// Stable credential filename used for per-account UI preferences.
+    pub account_key: String,
     pub account_email: String,
     /// Plan type: "free", "plus", "pro", "team", etc.
     pub plan_type: String,
@@ -52,7 +54,8 @@ pub struct CodexQuotaResult {
     pub primary_used_percent: f64,
     pub primary_reset_at: Option<i64>,
     /// Secondary rate limit window (usually weekly)
-    pub secondary_used_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secondary_used_percent: Option<f64>,
     pub secondary_reset_at: Option<i64>,
     /// Credits balance (for Pro plans)
     pub has_credits: bool,

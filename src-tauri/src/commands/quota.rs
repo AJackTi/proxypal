@@ -415,6 +415,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
 
     // Phase 1: Collect credentials (sequential, fast I/O)
     struct CodexCred {
+        account_key: String,
         email: String,
         access_token: String,
         account_id: Option<String>,
@@ -447,6 +448,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
             match cred["access_token"].as_str() {
                 Some(t) => {
                     credentials.push(CodexCred {
+                        account_key: filename,
                         email,
                         access_token: t.to_string(),
                         account_id: cred["account_id"].as_str().map(|s| s.to_string()),
@@ -454,11 +456,12 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                 }
                 None => {
                     error_results.push(crate::types::CodexQuotaResult {
+                        account_key: filename,
                         account_email: email,
                         plan_type: "unknown".to_string(),
                         primary_used_percent: 0.0,
                         primary_reset_at: None,
-                        secondary_used_percent: 0.0,
+                        secondary_used_percent: None,
                         secondary_reset_at: None,
                         has_credits: false,
                         credits_balance: None,
@@ -507,8 +510,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
 
                         let primary_used_percent = primary["used_percent"].as_f64().unwrap_or(0.0);
                         let primary_reset_at = primary["reset_at"].as_i64();
-                        let secondary_used_percent =
-                            secondary["used_percent"].as_f64().unwrap_or(0.0);
+                        let secondary_used_percent = secondary["used_percent"].as_f64();
                         let secondary_reset_at = secondary["reset_at"].as_i64();
 
                         let credits = &body["credits"];
@@ -517,6 +519,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                         let credits_unlimited = credits["unlimited"].as_bool().unwrap_or(false);
 
                         crate::types::CodexQuotaResult {
+                            account_key: cred.account_key,
                             account_email: cred.email,
                             plan_type,
                             primary_used_percent,
@@ -533,11 +536,12 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                         let status = resp.status();
                         let error_body = resp.text().await.unwrap_or_default();
                         crate::types::CodexQuotaResult {
+                            account_key: cred.account_key,
                             account_email: cred.email,
                             plan_type: "unknown".to_string(),
                             primary_used_percent: 0.0,
                             primary_reset_at: None,
-                            secondary_used_percent: 0.0,
+                            secondary_used_percent: None,
                             secondary_reset_at: None,
                             has_credits: false,
                             credits_balance: None,
@@ -548,11 +552,12 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                     }
                 }
                 Err(e) => crate::types::CodexQuotaResult {
+                    account_key: cred.account_key,
                     account_email: cred.email,
                     plan_type: "unknown".to_string(),
                     primary_used_percent: 0.0,
                     primary_reset_at: None,
-                    secondary_used_percent: 0.0,
+                    secondary_used_percent: None,
                     secondary_reset_at: None,
                     has_credits: false,
                     credits_balance: None,

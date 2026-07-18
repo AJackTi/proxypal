@@ -1,10 +1,45 @@
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
+import { getCodexRateLimits } from "./codexQuota";
+
+const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
 
 interface CodexQuotaWidgetProps {
   authStatus: { openai: number };
+}
+
+interface VisibilityIconProps {
+  hidden: boolean;
+}
+
+function VisibilityIcon(props: VisibilityIconProps) {
+  return (
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <Show
+        fallback={
+          <>
+            <path
+              d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+            />
+            <circle cx="12" cy="12" r="3" stroke-width="2" />
+          </>
+        }
+        when={props.hidden}
+      >
+        <path
+          d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.9 4.24A10.4 10.4 0 0112 4c5 0 9.27 3.11 11 7.5a11.8 11.8 0 01-2.1 3.5M6.61 6.61A11.7 11.7 0 001 11.5C2.73 15.89 7 19 12 19a10.7 10.7 0 005.39-1.39"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+        />
+      </Show>
+    </svg>
+  );
 }
 
 // Codex Quota Widget - shows rate limits and credits for OpenAI/Codex accounts
@@ -14,6 +49,18 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal(false);
+  const [hiddenAccounts, setHiddenAccounts] = createSignal<Set<string>>(new Set());
+  const [showHiddenAccounts, setShowHiddenAccounts] = createSignal(false);
+
+  const hiddenAccountCount = createMemo(
+    () => quotaData().filter((account) => hiddenAccounts().has(account.accountKey)).length,
+  );
+  const visibleQuotaData = createMemo(() => {
+    if (showHiddenAccounts()) {
+      return quotaData();
+    }
+    return quotaData().filter((account) => !hiddenAccounts().has(account.accountKey));
+  });
 
   const loadQuota = async (forceRefresh = false) => {
     setLoading(true);
@@ -29,10 +76,36 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   };
 
   onMount(() => {
+    try {
+      const savedHiddenAccounts = JSON.parse(
+        localStorage.getItem(HIDDEN_ACCOUNTS_STORAGE_KEY) ?? "[]",
+      );
+      if (Array.isArray(savedHiddenAccounts)) {
+        setHiddenAccounts(
+          new Set(savedHiddenAccounts.filter((email) => typeof email === "string")),
+        );
+      }
+    } catch {
+      localStorage.removeItem(HIDDEN_ACCOUNTS_STORAGE_KEY);
+    }
+
     if (props.authStatus.openai > 0) {
       loadQuota();
     }
   });
+
+  const toggleAccountVisibility = (accountKey: string) => {
+    setHiddenAccounts((current) => {
+      const next = new Set(current);
+      if (next.has(accountKey)) {
+        next.delete(accountKey);
+      } else {
+        next.add(accountKey);
+      }
+      localStorage.setItem(HIDDEN_ACCOUNTS_STORAGE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   const formatResetTime = (timestamp?: number) => {
     if (!timestamp) {
@@ -99,7 +172,31 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
           </Show>
         </div>
         <div class="flex items-center gap-2">
+          <Show when={hiddenAccountCount() > 0}>
+            <button
+              aria-pressed={showHiddenAccounts()}
+              class="flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-500 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowHiddenAccounts(!showHiddenAccounts());
+              }}
+              title={
+                showHiddenAccounts()
+                  ? t("dashboard.quota.hideHiddenAccounts")
+                  : t("dashboard.quota.showHiddenAccounts", { count: hiddenAccountCount() })
+              }
+            >
+              <VisibilityIcon hidden={!showHiddenAccounts()} />
+              <span class="hidden sm:inline">
+                {showHiddenAccounts()
+                  ? t("dashboard.quota.hideHiddenAccounts")
+                  : t("dashboard.quota.showHiddenAccounts", { count: hiddenAccountCount() })}
+              </span>
+              <span class="sm:hidden">{hiddenAccountCount()}</span>
+            </button>
+          </Show>
           <button
+            aria-label={t("dashboard.quota.refresh")}
             class="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50 dark:hover:text-gray-300"
             disabled={loading()}
             onClick={(e) => {
@@ -167,79 +264,84 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
             </div>
           </Show>
 
-          <For each={quotaData()}>
+          <For each={visibleQuotaData()}>
             {(account) => (
-              <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+              <div
+                class={`overflow-hidden rounded-lg border transition-opacity ${
+                  hiddenAccounts().has(account.accountKey)
+                    ? "border-dashed border-gray-300 opacity-60 dark:border-gray-600"
+                    : "border-gray-200 dark:border-gray-700"
+                }`}
+              >
                 <div class="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-700/50">
-                  <div class="flex items-center gap-2">
+                  <div class="flex min-w-0 items-center gap-2">
                     <h4 class="truncate text-sm font-medium text-gray-700 dark:text-gray-300">
                       {account.accountEmail}
                     </h4>
                     <span class="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                       {account.planType}
                     </span>
+                    <Show when={hiddenAccounts().has(account.accountKey)}>
+                      <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-gray-500 dark:bg-gray-600 dark:text-gray-300">
+                        {t("dashboard.quota.hidden")}
+                      </span>
+                    </Show>
                   </div>
-                  <Show when={account.error}>
-                    <span class="text-[10px] font-medium text-red-500">
-                      {t("dashboard.quota.apiError")}
-                    </span>
-                  </Show>
+                  <div class="ml-2 flex shrink-0 items-center gap-2">
+                    <Show when={account.error}>
+                      <span class="text-[10px] font-medium text-red-500">
+                        {t("dashboard.quota.apiError")}
+                      </span>
+                    </Show>
+                    <button
+                      aria-label={
+                        hiddenAccounts().has(account.accountKey)
+                          ? t("dashboard.quota.showAccount")
+                          : t("dashboard.quota.hideAccount")
+                      }
+                      class="rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-600 dark:hover:text-gray-200"
+                      onClick={() => toggleAccountVisibility(account.accountKey)}
+                      title={
+                        hiddenAccounts().has(account.accountKey)
+                          ? t("dashboard.quota.showAccount")
+                          : t("dashboard.quota.hideAccount")
+                      }
+                    >
+                      <VisibilityIcon hidden={hiddenAccounts().has(account.accountKey)} />
+                    </button>
+                  </div>
                 </div>
                 <div class="space-y-3 bg-white p-3 dark:bg-gray-800">
-                  {/* Primary Rate Limit (3-hour window) */}
-                  <div>
-                    <div class="mb-1 flex items-center justify-between">
-                      <span class="text-xs text-gray-500">
-                        {t("dashboard.quota.primaryLimit3h")}
-                      </span>
-                      <span
-                        class={`text-xs font-medium ${getUsageColor(account.primaryUsedPercent)}`}
-                      >
-                        {t("dashboard.quota.percentUsed", {
-                          count: account.primaryUsedPercent.toFixed(0),
-                        })}
-                      </span>
-                    </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                      <div
-                        class={`h-full ${getProgressColor(account.primaryUsedPercent)} transition-all`}
-                        style={{
-                          width: `${Math.min(account.primaryUsedPercent, 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <p class="mt-0.5 text-[10px] text-gray-400">
-                      {t("dashboard.quota.resetsIn", {
-                        time: formatResetTime(account.primaryResetAt),
-                      })}
-                    </p>
-                  </div>
-
-                  {/* Secondary Rate Limit (weekly window) */}
-                  <div>
-                    <div class="mb-1 flex items-center justify-between">
-                      <span class="text-xs text-gray-500">{t("dashboard.quota.weeklyLimit")}</span>
-                      <span
-                        class={`text-xs font-medium ${getUsageColor(account.secondaryUsedPercent)}`}
-                      >
-                        {t("dashboard.quota.percentUsed", {
-                          count: account.secondaryUsedPercent.toFixed(0),
-                        })}
-                      </span>
-                    </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-                      <div
-                        class={`h-full ${getProgressColor(account.secondaryUsedPercent)} transition-all`}
-                        style={{
-                          width: `${Math.min(account.secondaryUsedPercent, 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <p class="mt-0.5 text-[10px] text-gray-400">
-                      {t("dashboard.quota.resetsIn", {
-                        time: formatResetTime(account.secondaryResetAt),
-                      })}
-                    </p>
+                  <div class="space-y-3">
+                    <For each={getCodexRateLimits(account)}>
+                      {(limit) => (
+                        <div>
+                          <div class="mb-1 flex items-center justify-between">
+                            <span class="text-xs text-gray-500">
+                              {limit.labelKey === "primaryLimit3h"
+                                ? t("dashboard.quota.primaryLimit3h")
+                                : t("dashboard.quota.weeklyLimit")}
+                            </span>
+                            <span class={`text-xs font-medium ${getUsageColor(limit.usedPercent)}`}>
+                              {t("dashboard.quota.percentUsed", {
+                                count: limit.usedPercent.toFixed(0),
+                              })}
+                            </span>
+                          </div>
+                          <div class="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+                            <div
+                              class={`h-full ${getProgressColor(limit.usedPercent)} transition-all`}
+                              style={{ width: `${Math.min(limit.usedPercent, 100)}%` }}
+                            />
+                          </div>
+                          <p class="mt-0.5 text-[10px] text-gray-400">
+                            {t("dashboard.quota.resetsIn", {
+                              time: formatResetTime(limit.resetAt),
+                            })}
+                          </p>
+                        </div>
+                      )}
+                    </For>
                   </div>
 
                   {/* Credits (for Pro plans) */}

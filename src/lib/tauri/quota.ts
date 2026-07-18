@@ -16,6 +16,7 @@ export interface AntigravityQuotaResult {
 }
 
 export interface CodexQuotaResult {
+  accountKey: string;
   accountEmail: string;
   creditsBalance?: number;
   creditsUnlimited: boolean;
@@ -26,7 +27,7 @@ export interface CodexQuotaResult {
   primaryResetAt?: number;
   primaryUsedPercent: number;
   secondaryResetAt?: number;
-  secondaryUsedPercent: number;
+  secondaryUsedPercent?: number;
 }
 
 export interface CopilotQuotaResult {
