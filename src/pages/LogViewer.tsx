@@ -2,6 +2,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
+import { scrollLogContainerToLatest } from "../lib/logViewer";
 import {
   clearLogs,
   getLogs,
@@ -39,6 +40,7 @@ export function LogViewerPage() {
   const [search, setSearch] = createSignal("");
   const [showClearConfirm, setShowClearConfirm] = createSignal(false);
   const [displayLimit, setDisplayLimit] = createSignal(DISPLAY_CHUNK_SIZE);
+  const [scrollToLatest, setScrollToLatest] = createSignal(false);
 
   // Error logs state
   const [errorLogFiles, setErrorLogFiles] = createSignal<string[]>([]);
@@ -49,6 +51,9 @@ export function LogViewerPage() {
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
   let logContainerRef: HTMLDivElement | undefined;
   let prevRunning = false;
+  const setLogContainerRef = (element: HTMLDivElement) => {
+    logContainerRef = element;
+  };
 
   // Load logs once on mount when proxy is running
   onMount(() => {
@@ -106,14 +111,9 @@ export function LogViewerPage() {
     setLoading(true);
     try {
       const result = await getLogs(INITIAL_LOG_FETCH);
+      setScrollToLatest(true);
       setLogs(result);
       setDisplayLimit(DISPLAY_CHUNK_SIZE); // Reset display limit on fresh load
-      // Auto-scroll to bottom (use requestAnimationFrame for smoother UX)
-      if (logContainerRef) {
-        requestAnimationFrame(() => {
-          logContainerRef!.scrollTop = logContainerRef!.scrollHeight;
-        });
-      }
     } catch (error) {
       toastStore.error(t("logs.toasts.failedToLoadLogs"), String(error));
     } finally {
@@ -149,6 +149,25 @@ export function LogViewerPage() {
       return all;
     }
     return all.slice(-limit);
+  });
+
+  // Scroll only after Solid has rendered the refreshed log list. Calling this
+  // directly after setLogs can race the DOM update and leave the viewport at the top.
+  createEffect(() => {
+    if (!scrollToLatest()) {
+      return;
+    }
+
+    const hasLogs = displayedLogs().length > 0;
+    if (!hasLogs) {
+      setScrollToLatest(false);
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollLogContainerToLatest(logContainerRef);
+      setScrollToLatest(false);
+    });
   });
 
   const hasMoreLogs = createMemo(() => filteredLogs().length > displayLimit());
@@ -471,7 +490,7 @@ export function LogViewerPage() {
             {/* Log list */}
             <div
               class="flex-1 overflow-y-auto bg-gray-50 font-mono text-xs dark:bg-gray-900"
-              ref={logContainerRef}
+              ref={setLogContainerRef}
             >
               {/* Loading skeleton for initial load */}
               <Show when={initialLoad() && loading()}>
