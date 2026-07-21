@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  isAuthFileExpansionDisabled,
-  selectFilesForDownload,
-  shouldAuthFileStartCollapsed,
-  summarizeAuthConnectionTests,
-} from "./authFiles";
+import { isAuthFileAutoCollapsed, selectFilesForDownload } from "./authFiles";
 
 import type { AuthFile } from "./tauri/auth-files";
 
@@ -23,46 +18,14 @@ describe("selectFilesForDownload", () => {
   });
 });
 
-describe("auth file collapsing", () => {
-  it("starts invalidated tokens collapsed but keeps them expandable", () => {
-    const file = {
-      ...files[0],
-      disabled: false,
-      statusMessage: "authentication token has been invalidated",
-      unavailable: true,
-    };
-
-    expect(shouldAuthFileStartCollapsed(file)).toBe(true);
-    expect(isAuthFileExpansionDisabled(file)).toBe(false);
+describe("isAuthFileAutoCollapsed", () => {
+  it("collapses unavailable auth files", () => {
+    expect(isAuthFileAutoCollapsed({ ...files[0], unavailable: true })).toBe(true);
   });
 
-  it("does not collapse unrelated unavailable errors", () => {
-    const file = {
-      ...files[0],
-      disabled: false,
-      statusMessage: "temporary upstream connection error",
-      unavailable: true,
-    };
-
-    expect(shouldAuthFileStartCollapsed(file)).toBe(false);
-    expect(isAuthFileExpansionDisabled(file)).toBe(false);
-  });
-
-  it("keeps disabled auth files collapsed and non-expandable", () => {
-    const file = { ...files[0], disabled: true, unavailable: false };
-    expect(shouldAuthFileStartCollapsed(file)).toBe(true);
-    expect(isAuthFileExpansionDisabled(file)).toBe(true);
-  });
-});
-
-describe("summarizeAuthConnectionTests", () => {
-  it("counts passed, failed and skipped auth entries", () => {
-    expect(
-      summarizeAuthConnectionTests([
-        { message: "ok", status: "passed" },
-        { message: "bad", status: "failed" },
-        { message: "disabled", status: "skipped" },
-      ]),
-    ).toEqual({ failed: 1, passed: 1, skipped: 1 });
+  it("keeps usable auth files expandable", () => {
+    expect(isAuthFileAutoCollapsed({ ...files[0], disabled: false, unavailable: false })).toBe(
+      false,
+    );
   });
 });
