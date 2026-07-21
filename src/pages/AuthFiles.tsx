@@ -1,21 +1,25 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
-import { isAuthFileAutoCollapsed, selectFilesForDownload } from "../lib/authFiles";
-import { selectLatestGptModel } from "../lib/gptModel";
+import {
+  isAuthFileExpansionDisabled,
+  selectFilesForDownload,
+  shouldAuthFileStartCollapsed,
+  summarizeAuthConnectionTests,
+} from "../lib/authFiles";
 import {
   type AuthFile,
+  type AuthConnectionTestResult,
   batchDeleteAuthFiles,
   deleteAllAuthFiles,
   deleteAuthFile,
   downloadAuthFile,
-  getAvailableModels,
   getAuthFiles,
-  getGptReasoningModels,
   refreshAuthStatus,
   toggleAuthFile,
+  testAuthFileConnection,
   uploadAuthFile,
 } from "../lib/tauri";
 import { appStore } from "../stores/app";
@@ -90,8 +94,13 @@ export function AuthFilesPage() {
   const [testingProvider, setTestingProvider] = createSignal<string | null>(null);
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = createSignal(false);
-  const [collapsedIds, setCollapsedIds] = createSignal<Set<string>>(new Set());
+  const [expansionOverrides, setExpansionOverrides] = createSignal<Record<string, boolean>>({});
   const [downloadingAll, setDownloadingAll] = createSignal(false);
+  const [testingAll, setTestingAll] = createSignal(false);
+  const [testProgress, setTestProgress] = createSignal({ current: 0, total: 0 });
+  const [authTestResults, setAuthTestResults] = createSignal<
+    Record<string, AuthConnectionTestResult>
+  >({});
 
   // Load auth files on mount and when proxy status changes
   createEffect(() => {
@@ -238,70 +247,92 @@ export function AuthFilesPage() {
     }
 
     setTestingProvider(file.name);
-
-    // Determine a model to test with based on provider.
-    // Keys match CLIProxyAPI's canonical Auth.Provider values;
-    // "gemini-cli" also handled via the "gemini" prefix lookup below.
-    const providerTestModels: Record<string, string> = {
-      antigravity: "gemini-2.5-flash",
-      claude: "claude-sonnet-4-5",
-      codex: "gpt-5.5",
-      deepseek: "deepseek-chat",
-      gemini: "gemini-2.5-flash",
-      iflow: "glm-4.5",
-      kimi: "kimi-k2.5",
-      qwen: "qwen3-coder-plus",
-      vertex: "gemini-2.5-flash",
-    };
-    let modelId =
-      providerTestModels[p] ??
-      Object.entries(providerTestModels).find(([key]) => p.includes(key))?.[1] ??
-      null;
-
-    if (p.includes("codex")) {
-      try {
-        const availableModels = await getAvailableModels();
-        const supportedGptModels = await getGptReasoningModels();
-        modelId =
-          selectLatestGptModel(availableModels.map((model) => model.id)) ??
-          selectLatestGptModel(supportedGptModels) ??
-          modelId;
-      } catch (error) {
-        console.warn("Failed to resolve latest GPT model; using fallback:", error);
-      }
-    }
-
-    if (!modelId) {
-      setTestingProvider(null);
-      toastStore.error(
-        t("authFiles.toasts.unknownProviderCannotDetermineTestModel", {
-          provider: file.provider,
-        }),
-      );
-      return;
-    }
-
     try {
-      const { testProviderConnection } = await import("../lib/tauri");
-      const result = await testProviderConnection(modelId);
-      if (result.success) {
+      const result = await testOneAuthFile(file);
+      setAuthTestResults((previous) => ({ ...previous, [file.id]: result }));
+      if (result.status === "passed") {
         toastStore.success(
           t("authFiles.toasts.connectionToProviderSuccessful", {
             latency: result.latencyMs ?? "-",
             provider: file.provider,
           }),
         );
+      } else if (result.status === "skipped") {
+        toastStore.error(t("authFiles.toasts.testSkipped"), result.message);
       } else {
         toastStore.error(t("authFiles.toasts.connectionFailed"), result.message);
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      toastStore.error(t("authFiles.toasts.testFailed"), message);
     } finally {
       setTestingProvider(null);
       await loadFiles();
     }
   };
+
+  const testOneAuthFile = async (file: AuthFile): Promise<AuthConnectionTestResult> => {
+    if (file.disabled || file.unavailable) {
+      return {
+        message: file.disabled ? "Auth file is disabled" : "Auth file is unavailable",
+        status: "skipped",
+      };
+    }
+    if (!file.authIndex) {
+      return {
+        message: "The proxy did not expose an auth index for this file",
+        status: "skipped",
+      };
+    }
+
+    try {
+      return await testAuthFileConnection(file.authIndex, file.provider, file.name);
+    } catch (error: unknown) {
+      return {
+        message: error instanceof Error ? error.message : String(error),
+        status: "failed",
+      };
+    }
+  };
+
+  const handleTestAllConnections = async () => {
+    if (testingAll() || files().length === 0) {
+      return;
+    }
+
+    setTestingAll(true);
+    setAuthTestResults({});
+    setTestProgress({ current: 0, total: files().length });
+
+    const results: Record<string, AuthConnectionTestResult> = {};
+    for (const [index, file] of files().entries()) {
+      if (!file.disabled && !file.unavailable) {
+        setTestingProvider(file.name);
+      }
+      const result = await testOneAuthFile(file);
+
+      results[file.id] = result;
+      setAuthTestResults({ ...results });
+      setTestProgress({ current: index + 1, total: files().length });
+    }
+
+    const summary = summarizeAuthConnectionTests(Object.values(results));
+    const summaryMessage = t("authFiles.toasts.testAllSummary", {
+      failed: summary.failed,
+      passed: summary.passed,
+      skipped: summary.skipped,
+    });
+    if (summary.failed > 0 || summary.passed === 0) {
+      toastStore.error(summaryMessage);
+    } else {
+      toastStore.success(summaryMessage);
+    }
+    setTestingProvider(null);
+    setTestingAll(false);
+    await loadFiles();
+  };
+
+  const testSummary = createMemo(() =>
+    summarizeAuthConnectionTests(Object.values(authTestResults())),
+  );
+  const hasAuthTestResults = createMemo(() => Object.keys(authTestResults()).length > 0);
 
   const handleDelete = async (file: AuthFile) => {
     setFileToDelete(file);
@@ -439,47 +470,42 @@ export function AuthFilesPage() {
     }
   };
 
-  const isExpanded = (file: AuthFile) =>
-    !isAuthFileAutoCollapsed(file) && !collapsedIds().has(file.id);
+  const isExpanded = (file: AuthFile) => {
+    if (isAuthFileExpansionDisabled(file)) {
+      return false;
+    }
+    const override = expansionOverrides()[file.id];
+    if (override !== undefined) {
+      return override;
+    }
+    return !shouldAuthFileStartCollapsed(file);
+  };
 
   const toggleExpanded = (file: AuthFile) => {
-    if (isAuthFileAutoCollapsed(file)) {
+    if (isAuthFileExpansionDisabled(file)) {
       return;
     }
-
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(file.id)) {
-        next.delete(file.id);
-      } else {
-        next.add(file.id);
-      }
-      return next;
-    });
+    setExpansionOverrides((previous) => ({ ...previous, [file.id]: !isExpanded(file) }));
   };
 
   const toggleAllExpanded = () => {
     const visible = filteredFiles();
-    const expandable = visible.filter((file) => !isAuthFileAutoCollapsed(file));
+    const expandable = visible.filter((file) => !isAuthFileExpansionDisabled(file));
     const shouldCollapse = expandable.length > 0 && expandable.every((file) => isExpanded(file));
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
+    setExpansionOverrides((previous) => {
+      const next = { ...previous };
       for (const file of expandable) {
-        if (shouldCollapse) {
-          next.add(file.id);
-        } else {
-          next.delete(file.id);
-        }
+        next[file.id] = !shouldCollapse;
       }
       return next;
     });
   };
 
-  const allVisibleExpanded = () => {
+  const allVisibleExpanded = createMemo(() => {
     const visible = filteredFiles();
-    const expandable = visible.filter((file) => !isAuthFileAutoCollapsed(file));
+    const expandable = visible.filter((file) => !isAuthFileExpansionDisabled(file));
     return expandable.length > 0 && expandable.every((file) => isExpanded(file));
-  };
+  });
 
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedIds());
@@ -590,6 +616,33 @@ export function AuthFilesPage() {
 
           <div class="flex items-center gap-2">
             <Show when={files().length > 0}>
+              <Button
+                class="px-2 sm:px-3"
+                disabled={testingAll() || !proxyStatus().running}
+                onClick={handleTestAllConnections}
+                size="sm"
+                title={t("authFiles.actions.testAll")}
+                variant="ghost"
+              >
+                <svg
+                  class={`mr-1.5 h-4 w-4 ${testingAll() ? "animate-spin" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+                <span class="hidden sm:inline">
+                  {testingAll()
+                    ? t("authFiles.actions.testingAllProgress", testProgress())
+                    : t("authFiles.actions.testAll")}
+                </span>
+              </Button>
               <Button
                 aria-label={
                   selectedIds().size > 0
@@ -704,6 +757,22 @@ export function AuthFilesPage() {
           </Show>
 
           <Show when={proxyStatus().running}>
+            <Show when={hasAuthTestResults()}>
+              <div class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+                <span class="font-medium text-gray-700 dark:text-gray-200">
+                  {t("authFiles.testResults.title")}
+                </span>
+                <span class="text-green-600 dark:text-green-400">
+                  {t("authFiles.testResults.passed", { count: testSummary().passed })}
+                </span>
+                <span class="text-red-600 dark:text-red-400">
+                  {t("authFiles.testResults.failed", { count: testSummary().failed })}
+                </span>
+                <span class="text-gray-500 dark:text-gray-400">
+                  {t("authFiles.testResults.skipped", { count: testSummary().skipped })}
+                </span>
+              </div>
+            </Show>
             {/* Filter Tabs */}
             <Show when={files().length > 0}>
               <div class="mb-4 flex flex-wrap items-center gap-2">
@@ -892,6 +961,26 @@ export function AuthFilesPage() {
                                   {t("common.disabled")}
                                 </span>
                               </Show>
+                              <Show when={authTestResults()[file.id]}>
+                                {(testResult) => (
+                                  <span
+                                    class={`rounded border px-2 py-0.5 text-xs font-medium ${
+                                      testResult().status === "skipped"
+                                        ? "border-gray-200 bg-gray-100 text-gray-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                                        : testResult().status === "passed"
+                                          ? "border-green-200 bg-green-100 text-green-600 dark:border-green-800 dark:bg-green-900/30 dark:text-green-400"
+                                          : "border-red-200 bg-red-100 text-red-600 dark:border-red-800 dark:bg-red-900/30 dark:text-red-400"
+                                    }`}
+                                    title={testResult().message}
+                                  >
+                                    {testResult().status === "skipped"
+                                      ? t("authFiles.testResults.skippedLabel")
+                                      : testResult().status === "passed"
+                                        ? t("authFiles.testResults.passedLabel")
+                                        : t("authFiles.testResults.failedLabel")}
+                                  </span>
+                                )}
+                              </Show>
                             </div>
 
                             <Show when={isExpanded(file)}>
@@ -955,7 +1044,9 @@ export function AuthFilesPage() {
                                       ? "cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-700"
                                       : "border border-brand-200/50 bg-brand-50 text-brand-600 hover:bg-brand-100 dark:border-brand-800/50 dark:bg-brand-900/20 dark:text-brand-400 dark:hover:bg-brand-900/30"
                                   }`}
-                                  disabled={testingProvider() === file.name || file.disabled}
+                                  disabled={
+                                    testingAll() || testingProvider() === file.name || file.disabled
+                                  }
                                   onClick={() => handleTestConnection(file)}
                                   type="button"
                                 >
@@ -1043,7 +1134,7 @@ export function AuthFilesPage() {
                                 : t("authFiles.actions.expandDetails")
                             }
                             class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 dark:disabled:hover:bg-transparent dark:disabled:hover:text-gray-400"
-                            disabled={isAuthFileAutoCollapsed(file)}
+                            disabled={isAuthFileExpansionDisabled(file)}
                             onClick={() => toggleExpanded(file)}
                             title={
                               isExpanded(file)

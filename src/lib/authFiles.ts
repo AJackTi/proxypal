@@ -1,7 +1,20 @@
-import type { AuthFile } from "./tauri/auth-files";
+import type { AuthConnectionTestResult, AuthFile } from "./tauri/auth-files";
 
-export function isAuthFileAutoCollapsed(file: Pick<AuthFile, "disabled" | "unavailable">): boolean {
-  return file.disabled || file.unavailable;
+export interface AuthConnectionTestSummary {
+  failed: number;
+  passed: number;
+  skipped: number;
+}
+
+export function shouldAuthFileStartCollapsed(
+  file: Pick<AuthFile, "disabled" | "statusMessage">,
+): boolean {
+  const statusMessage = file.statusMessage?.toLowerCase() ?? "";
+  return file.disabled || statusMessage.includes("authentication token has been invalidated");
+}
+
+export function isAuthFileExpansionDisabled(file: Pick<AuthFile, "disabled">): boolean {
+  return file.disabled;
 }
 
 /**
@@ -17,4 +30,14 @@ export function selectFilesForDownload(
   }
 
   return files.filter((file) => selectedIds.has(file.id));
+}
+
+export function summarizeAuthConnectionTests(
+  results: Iterable<AuthConnectionTestResult>,
+): AuthConnectionTestSummary {
+  const summary = { failed: 0, passed: 0, skipped: 0 };
+  for (const result of results) {
+    summary[result.status]++;
+  }
+  return summary;
 }

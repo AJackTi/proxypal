@@ -1,11 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthConnectionTestStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthConnectionTestResult {
+    pub status: AuthConnectionTestStatus,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+}
+
 // Auth file entry from Management API
 // Fields `priority` and `note` added in CLIProxyAPI v6.8.55+ (GET /auth-files response)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthFile {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_index: Option<String>,
     pub name: String,
     pub provider: String,
     #[serde(skip_serializing_if = "Option::is_none")]
