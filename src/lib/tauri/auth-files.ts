@@ -5,8 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 export interface AuthFile {
   account?: string;
   accountType?: string;
-  /** Stable credential index used to target one concrete auth entry. */
-  authIndex?: string;
   createdAt?: string;
   disabled: boolean;
   email?: string;
@@ -30,12 +28,6 @@ export interface AuthFile {
   successCount?: number;
   unavailable: boolean;
   updatedAt?: string;
-}
-
-export interface AuthConnectionTestResult {
-  latencyMs?: number;
-  message: string;
-  status: "failed" | "passed" | "skipped";
 }
 
 export async function getAuthFiles(): Promise<AuthFile[]> {
@@ -71,12 +63,4 @@ export interface BatchDeleteResult {
 
 export async function batchDeleteAuthFiles(fileIds: string[]): Promise<BatchDeleteResult> {
   return invoke("batch_delete_auth_files", { fileIds });
-}
-
-export async function testAuthFileConnection(
-  authIndex: string,
-  provider: string,
-  fileName: string,
-): Promise<AuthConnectionTestResult> {
-  return invoke("test_auth_file_connection", { authIndex, fileName, provider });
 }
