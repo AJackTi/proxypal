@@ -168,10 +168,6 @@ export const Sidebar: Component = () => {
     }
   };
 
-  const navigateTo = (id: PageId) => {
-    setCurrentPage(id);
-  };
-
   return (
     <div
       class="fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-gray-200 bg-white transition-all duration-200 dark:border-gray-800 dark:bg-gray-900"
@@ -263,12 +259,7 @@ export const Sidebar: Component = () => {
                 "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white":
                   !isActive(item.id),
               }}
-              onClick={() => navigateTo(item.id)}
-              onPointerDown={(event) => {
-                if (event.button === 0) {
-                  navigateTo(item.id);
-                }
-              }}
+              onClick={() => setCurrentPage(item.id)}
               title={!isExpanded() ? getNavLabel(item.id) : undefined}
               type="button"
             >
