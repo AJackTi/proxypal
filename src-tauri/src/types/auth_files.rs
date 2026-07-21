@@ -1,11 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthConnectionTestStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthConnectionTestResult {
+    pub status: AuthConnectionTestStatus,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+}
+
 // Auth file entry from Management API
 // Fields `priority` and `note` added in CLIProxyAPI v6.8.55+ (GET /auth-files response)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthFile {
     pub id: String,
+    #[serde(alias = "auth_index", skip_serializing_if = "Option::is_none")]
+    pub auth_index: Option<String>,
     pub name: String,
     pub provider: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -62,6 +81,7 @@ mod tests {
             "name": "codex-account.json",
             "provider": "openai",
             "status": "active",
+            "auth_index": "auth-123",
             "status_message": "ready",
             "runtime_only": true,
             "account_type": "plus",
@@ -74,6 +94,7 @@ mod tests {
 
         let file: AuthFile = serde_json::from_value(value).unwrap();
 
+        assert_eq!(file.auth_index.as_deref(), Some("auth-123"));
         assert_eq!(file.status_message.as_deref(), Some("ready"));
         assert!(file.runtime_only);
         assert_eq!(file.account_type.as_deref(), Some("plus"));

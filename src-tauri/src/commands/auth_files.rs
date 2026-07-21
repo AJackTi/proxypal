@@ -1,11 +1,85 @@
 //! Auth Files Management - via Management API
 
 use crate::state::AppState;
-use crate::types::{self, AuthFile};
+use crate::types::{self, AuthConnectionTestResult, AuthConnectionTestStatus, AuthFile};
 use crate::utils::detect_provider_from_filename;
 use crate::{build_management_client, get_management_key, get_management_url};
 use std::path::{Path, PathBuf};
 use tauri::State;
+
+#[derive(Debug, PartialEq)]
+struct AuthProbe {
+    url: &'static str,
+    headers: Vec<(&'static str, String)>,
+}
+
+fn auth_probe(provider: &str, account_id: Option<&str>) -> Option<AuthProbe> {
+    let provider = provider.trim().to_lowercase();
+    let bearer_headers = || {
+        vec![
+            ("Authorization", "Bearer $TOKEN$".to_string()),
+            ("Accept", "application/json".to_string()),
+            ("User-Agent", "ProxyPal/1.0".to_string()),
+        ]
+    };
+
+    if provider.contains("codex") {
+        let mut headers = bearer_headers();
+        if let Some(account_id) = account_id.filter(|value| !value.trim().is_empty()) {
+            headers.push(("ChatGPT-Account-Id", account_id.trim().to_string()));
+        }
+        return Some(AuthProbe {
+            url: "https://chatgpt.com/backend-api/wham/usage",
+            headers,
+        });
+    }
+
+    if provider.contains("claude") || provider.contains("anthropic") {
+        let mut headers = bearer_headers();
+        headers.push(("anthropic-beta", "oauth-2025-04-20".to_string()));
+        return Some(AuthProbe {
+            url: "https://api.anthropic.com/api/oauth/usage",
+            headers,
+        });
+    }
+
+    if provider.contains("gemini") || provider.contains("antigravity") {
+        return Some(AuthProbe {
+            url: "https://www.googleapis.com/oauth2/v2/userinfo?alt=json",
+            headers: bearer_headers(),
+        });
+    }
+
+    None
+}
+
+fn classify_probe_status(status_code: u16, latency_ms: u64) -> AuthConnectionTestResult {
+    if (200..300).contains(&status_code) {
+        return AuthConnectionTestResult {
+            status: AuthConnectionTestStatus::Passed,
+            message: "Connection successful".to_string(),
+            latency_ms: Some(latency_ms),
+        };
+    }
+
+    if status_code == 429 {
+        return AuthConnectionTestResult {
+            status: AuthConnectionTestStatus::Passed,
+            message: "Authentication succeeded, but the account is rate limited".to_string(),
+            latency_ms: Some(latency_ms),
+        };
+    }
+
+    let message = match status_code {
+        401 | 403 => "Authentication was rejected by the provider".to_string(),
+        _ => format!("Provider returned HTTP {}", status_code),
+    };
+    AuthConnectionTestResult {
+        status: AuthConnectionTestStatus::Failed,
+        message,
+        latency_ms: Some(latency_ms),
+    }
+}
 
 fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
     let requested = Path::new(filename);
@@ -47,7 +121,11 @@ async fn read_local_auth_file(filename: &str) -> Option<Vec<u8>> {
 // Get all auth files
 #[tauri::command]
 pub async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>, String> {
-    let port = state.config.lock().unwrap().port;
+    let port = state
+        .config
+        .lock()
+        .map_err(|error| format!("Failed to read proxy configuration: {}", error))?
+        .port;
     let url = get_management_url(port, "auth-files");
 
     // 1. Fetch active files from Management API
@@ -111,6 +189,7 @@ pub async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>,
                         let stem = name.strip_suffix(".json").unwrap_or(&name).to_string();
                         files.push(AuthFile {
                             id: stem.clone(),
+                            auth_index: None,
                             name: name.clone(),
                             provider: provider.to_string(),
                             status: "active".to_string(),
@@ -164,6 +243,7 @@ pub async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>,
                             // Create AuthFile entry for this disabled file
                             let disabled_file = AuthFile {
                                 id: dummy_id.clone(),
+                                auth_index: None,
                                 name: dummy_id,
                                 provider,
                                 status: "disabled".to_string(),
@@ -206,6 +286,101 @@ pub async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>,
     }
 
     Ok(files)
+}
+
+/// Test one concrete auth entry through CLIProxyAPI's management `api-call`
+/// endpoint. Unlike a normal proxy request, `auth_index` pins the request to
+/// the requested credential and cannot silently fall back to another account.
+#[tauri::command]
+pub async fn test_auth_file_connection(
+    state: State<'_, AppState>,
+    auth_index: String,
+    provider: String,
+    file_name: String,
+) -> Result<AuthConnectionTestResult, String> {
+    if auth_index.trim().is_empty() {
+        return Ok(AuthConnectionTestResult {
+            status: AuthConnectionTestStatus::Skipped,
+            message: "This proxy version does not expose an auth index for this file".to_string(),
+            latency_ms: None,
+        });
+    }
+
+    let account_id = match read_local_auth_file(&file_name).await {
+        Some(content) => {
+            let json = serde_json::from_slice::<serde_json::Value>(&content)
+                .map_err(|error| format!("Failed to parse auth file metadata: {}", error))?;
+            json.get("account_id")
+                .or_else(|| json.get("accountId"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        }
+        None => None,
+    };
+
+    let Some(probe) = auth_probe(&provider, account_id.as_deref()) else {
+        return Ok(AuthConnectionTestResult {
+            status: AuthConnectionTestStatus::Skipped,
+            message: format!("No reliable per-account connection probe for {}", provider),
+            latency_ms: None,
+        });
+    };
+
+    let port = state
+        .config
+        .lock()
+        .map_err(|error| format!("Failed to read proxy configuration: {}", error))?
+        .port;
+    let url = get_management_url(port, "api-call");
+    let headers = probe
+        .headers
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect::<std::collections::HashMap<_, _>>();
+    let payload = serde_json::json!({
+        "auth_index": auth_index,
+        "method": "GET",
+        "url": probe.url,
+        "header": headers,
+    });
+
+    let started = std::time::Instant::now();
+    let response = build_management_client()
+        .post(&url)
+        .header("X-Management-Key", &get_management_key())
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to test auth connection: {}", error))?;
+    let latency_ms = started.elapsed().as_millis() as u64;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(AuthConnectionTestResult {
+            status: AuthConnectionTestStatus::Skipped,
+            message: "The bundled proxy does not support per-auth connection tests".to_string(),
+            latency_ms: None,
+        });
+    }
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("Failed to read Management API error response: {}", error))?;
+        return Err(format!("Management API returned {}: {}", status, body));
+    }
+
+    let body = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| format!("Invalid connection test response: {}", error))?;
+    let status_code =
+        body.get("status_code")
+            .or_else(|| body.get("statusCode"))
+            .and_then(|value| value.as_u64())
+            .ok_or("Connection test response did not include a status code")? as u16;
+
+    Ok(classify_probe_status(status_code, latency_ms))
 }
 
 // Upload auth file
@@ -533,7 +708,10 @@ pub async fn batch_delete_auth_files(
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_file_delete_url, local_auth_file_candidates};
+    use super::{
+        auth_file_delete_url, auth_probe, classify_probe_status, local_auth_file_candidates,
+    };
+    use crate::types::AuthConnectionTestStatus;
 
     #[test]
     fn local_candidates_reject_path_traversal() {
@@ -561,6 +739,33 @@ mod tests {
             url.query_pairs().find(|(key, _)| key == "name").unwrap().1,
             filename
         );
+    }
+
+    #[test]
+    fn codex_probe_targets_usage_api_and_includes_account_id() {
+        let probe = auth_probe("codex", Some("account-123")).unwrap();
+        assert_eq!(probe.url, "https://chatgpt.com/backend-api/wham/usage");
+        assert!(probe
+            .headers
+            .iter()
+            .any(|(key, value)| *key == "ChatGPT-Account-Id" && value == "account-123"));
+    }
+
+    #[test]
+    fn unsupported_provider_has_no_probe() {
+        assert!(auth_probe("unknown-provider", None).is_none());
+    }
+
+    #[test]
+    fn rate_limit_still_proves_authentication() {
+        let result = classify_probe_status(429, 42);
+        assert!(matches!(result.status, AuthConnectionTestStatus::Passed));
+    }
+
+    #[test]
+    fn unauthorized_probe_fails() {
+        let result = classify_probe_status(401, 42);
+        assert!(matches!(result.status, AuthConnectionTestStatus::Failed));
     }
 }
 
