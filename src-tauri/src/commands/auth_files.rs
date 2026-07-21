@@ -16,10 +16,10 @@ fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
 
     let auth_dir = dirs::home_dir()?.join(".cli-proxy-api");
     let mut candidates = vec![auth_dir.join(basename)];
-    if basename.ends_with(".json") {
-        candidates.push(auth_dir.join(format!("{basename}.disabled")));
-    } else if !basename.ends_with(".json.disabled") {
+    if !basename.ends_with(".json") {
         candidates.push(auth_dir.join(format!("{basename}.json")));
+    }
+    if !basename.ends_with(".json.disabled") {
         candidates.push(auth_dir.join(format!("{basename}.json.disabled")));
     }
     Some(candidates)
@@ -35,26 +35,6 @@ async fn read_local_auth_file(filename: &str) -> Option<Vec<u8>> {
     .await
     .ok()
     .flatten()
-}
-
-async fn delete_local_auth_file(filename: &str) -> Result<bool, String> {
-    let candidates = match local_auth_file_candidates(filename) {
-        Some(candidates) => candidates,
-        None => return Ok(false),
-    };
-
-    tokio::task::spawn_blocking(move || {
-        for path in candidates {
-            if path.is_file() {
-                std::fs::remove_file(&path)
-                    .map_err(|e| format!("Failed to delete local auth file: {}", e))?;
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    })
-    .await
-    .map_err(|e| format!("Failed to delete local auth file: {}", e))?
 }
 
 // Get all auth files
@@ -287,13 +267,29 @@ pub async fn upload_auth_file(
 // Delete auth file
 #[tauri::command]
 pub async fn delete_auth_file(state: State<'_, AppState>, file_id: String) -> Result<(), String> {
+    // Check if it's a disabled file first (file_id matches filename without extension usually)
+    let auth_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?
+        .join(".cli-proxy-api");
+
+    let disabled_path = auth_dir.join(format!("{}.json.disabled", file_id));
+    if disabled_path.exists() {
+        std::fs::remove_file(disabled_path)
+            .map_err(|e| format!("Failed to delete disabled file: {}", e))?;
+        return Ok(());
+    }
+
+    // Otherwise try to delete via API
     let port = state.config.lock().unwrap().port;
-    let url = get_management_url(port, "auth-files");
+    let url = format!(
+        "{}?name={}",
+        get_management_url(port, "auth-files"),
+        file_id
+    );
 
     let client = build_management_client();
     let response = client
         .delete(&url)
-        .query(&[("name", file_id.as_str())])
         .header("X-Management-Key", &get_management_key())
         .send()
         .await
@@ -301,9 +297,6 @@ pub async fn delete_auth_file(state: State<'_, AppState>, file_id: String) -> Re
 
     if !response.status().is_success() {
         let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND && delete_local_auth_file(&file_id).await? {
-            return Ok(());
-        }
         let text = response.text().await.unwrap_or_default();
         return Err(format!("Failed to delete auth file: {} - {}", status, text));
     }
@@ -506,7 +499,22 @@ pub async fn batch_delete_auth_files(
     // Fallback: delete one by one
     let mut deleted = 0u32;
     let mut errors: Vec<String> = Vec::new();
+    let auth_dir = dirs::home_dir()
+        .ok_or("Could not find home directory")?
+        .join(".cli-proxy-api");
     for file_id in &file_ids {
+        // Check if it's a disabled file on disk
+        let disabled_path = auth_dir.join(format!("{}.json.disabled", file_id));
+        if disabled_path.exists() {
+            match std::fs::remove_file(&disabled_path) {
+                Ok(_) => {
+                    deleted += 1;
+                }
+                Err(e) => errors.push(format!("{}: {}", file_id, e)),
+            }
+            continue;
+        }
+
         let url = get_management_url(port, "auth-files");
         match client
             .delete(&url)
@@ -519,20 +527,6 @@ pub async fn batch_delete_auth_files(
                 deleted += 1;
             }
             Ok(resp) => {
-                let status = resp.status();
-                if status == reqwest::StatusCode::NOT_FOUND {
-                    match delete_local_auth_file(file_id).await {
-                        Ok(true) => {
-                            deleted += 1;
-                            continue;
-                        }
-                        Ok(false) => {}
-                        Err(e) => {
-                            errors.push(format!("{}: {}", file_id, e));
-                            continue;
-                        }
-                    }
-                }
                 let text = resp.text().await.unwrap_or_default();
                 errors.push(format!("{}: {}", file_id, text));
             }
@@ -559,17 +553,6 @@ mod tests {
     #[test]
     fn local_candidates_include_disabled_file_variant() {
         let candidates = local_auth_file_candidates("codex-account").unwrap();
-        assert!(candidates
-            .iter()
-            .any(|path| path.ends_with("codex-account.json")));
-        assert!(candidates
-            .iter()
-            .any(|path| path.ends_with("codex-account.json.disabled")));
-    }
-
-    #[test]
-    fn local_candidates_support_full_json_filename() {
-        let candidates = local_auth_file_candidates("codex-account.json").unwrap();
         assert!(candidates
             .iter()
             .any(|path| path.ends_with("codex-account.json")));

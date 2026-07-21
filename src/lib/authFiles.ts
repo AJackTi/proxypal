@@ -1,9 +1,5 @@
 import type { AuthFile } from "./tauri/auth-files";
 
-export function isAuthFileAutoCollapsed(file: Pick<AuthFile, "disabled" | "unavailable">): boolean {
-  return file.disabled || file.unavailable;
-}
-
 /**
  * Download selected files when a selection exists; otherwise download the full
  * auth-file list.
