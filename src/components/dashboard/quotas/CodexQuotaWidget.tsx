@@ -2,7 +2,11 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
-import { getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
+import {
+  getCodexRateLimits,
+  isCodexQuotaAuthUnavailable,
+  isCodexQuotaExhausted,
+} from "./codexQuota";
 
 const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
 
@@ -69,7 +73,7 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     setError(null);
     try {
       const results = await getCachedOrFetch("codex", fetchCodexQuota, forceRefresh);
-      setQuotaData(results);
+      setQuotaData(results.filter((account) => !isCodexQuotaAuthUnavailable(account)));
     } catch (error) {
       setError(String(error));
     } finally {

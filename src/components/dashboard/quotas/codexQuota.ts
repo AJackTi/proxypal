@@ -30,3 +30,11 @@ export function getCodexRateLimits(account: CodexQuotaResult): CodexRateLimit[] 
 export function isCodexQuotaExhausted(account: CodexQuotaResult): boolean {
   return getCodexRateLimits(account).some((limit) => limit.usedPercent >= 100);
 }
+
+export function isCodexQuotaAuthUnavailable(account: CodexQuotaResult): boolean {
+  const error = account.error?.toLowerCase() ?? "";
+  return (
+    error.includes("auth_unavailable") ||
+    error.includes("authentication token has been invalidated")
+  );
+}

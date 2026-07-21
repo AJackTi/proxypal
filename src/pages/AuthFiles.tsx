@@ -3,7 +3,7 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
-import { selectFilesForDownload } from "../lib/authFiles";
+import { isAuthFileAutoCollapsed, selectFilesForDownload } from "../lib/authFiles";
 import { selectLatestGptModel } from "../lib/gptModel";
 import {
   type AuthFile,
@@ -439,10 +439,11 @@ export function AuthFilesPage() {
     }
   };
 
-  const isExpanded = (file: AuthFile) => !file.disabled && !collapsedIds().has(file.id);
+  const isExpanded = (file: AuthFile) =>
+    !isAuthFileAutoCollapsed(file) && !collapsedIds().has(file.id);
 
   const toggleExpanded = (file: AuthFile) => {
-    if (file.disabled) {
+    if (isAuthFileAutoCollapsed(file)) {
       return;
     }
 
@@ -459,7 +460,7 @@ export function AuthFilesPage() {
 
   const toggleAllExpanded = () => {
     const visible = filteredFiles();
-    const expandable = visible.filter((file) => !file.disabled);
+    const expandable = visible.filter((file) => !isAuthFileAutoCollapsed(file));
     const shouldCollapse = expandable.length > 0 && expandable.every((file) => isExpanded(file));
     setCollapsedIds((prev) => {
       const next = new Set(prev);
@@ -476,7 +477,7 @@ export function AuthFilesPage() {
 
   const allVisibleExpanded = () => {
     const visible = filteredFiles();
-    const expandable = visible.filter((file) => !file.disabled);
+    const expandable = visible.filter((file) => !isAuthFileAutoCollapsed(file));
     return expandable.length > 0 && expandable.every((file) => isExpanded(file));
   };
 
@@ -1042,7 +1043,7 @@ export function AuthFilesPage() {
                                 : t("authFiles.actions.expandDetails")
                             }
                             class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-500 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200 dark:disabled:hover:bg-transparent dark:disabled:hover:text-gray-400"
-                            disabled={file.disabled}
+                            disabled={isAuthFileAutoCollapsed(file)}
                             onClick={() => toggleExpanded(file)}
                             title={
                               isExpanded(file)

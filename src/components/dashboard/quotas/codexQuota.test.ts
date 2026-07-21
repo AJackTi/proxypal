@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
+import {
+  getCodexRateLimits,
+  isCodexQuotaAuthUnavailable,
+  isCodexQuotaExhausted,
+} from "./codexQuota";
 
 import type { CodexQuotaResult } from "../../../lib/tauri";
 
@@ -63,5 +67,23 @@ describe("isCodexQuotaExhausted", () => {
 
   it("keeps accounts visible while all windows have remaining quota", () => {
     expect(isCodexQuotaExhausted({ ...baseAccount, primaryUsedPercent: 99.9 })).toBe(false);
+  });
+});
+
+describe("isCodexQuotaAuthUnavailable", () => {
+  it("filters invalidated authentication tokens from the quota widget", () => {
+    expect(
+      isCodexQuotaAuthUnavailable({
+        ...baseAccount,
+        error:
+          'API error 401: {"error":{"message":"Your authentication token has been invalidated.","code":"auth_unavailable"}}',
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps transient quota errors visible", () => {
+    expect(isCodexQuotaAuthUnavailable({ ...baseAccount, error: "Request failed: timeout" })).toBe(
+      false,
+    );
   });
 });
