@@ -30,3 +30,20 @@ export function getCodexRateLimits(account: CodexQuotaResult): CodexRateLimit[] 
 export function isCodexQuotaExhausted(account: CodexQuotaResult): boolean {
   return getCodexRateLimits(account).some((limit) => limit.usedPercent >= 100);
 }
+
+/** Invalidated credentials cannot provide quota and should not appear in this widget. */
+export function isCodexQuotaInvalidated(account: CodexQuotaResult): boolean {
+  const error = account.error?.toLowerCase();
+  if (!error) {
+    return false;
+  }
+
+  return (
+    error.includes("token_invalidated") ||
+    error.includes("authentication token has been invalidated")
+  );
+}
+
+export function filterCodexQuotaAccounts(accounts: CodexQuotaResult[]): CodexQuotaResult[] {
+  return accounts.filter((account) => !isCodexQuotaInvalidated(account));
+}

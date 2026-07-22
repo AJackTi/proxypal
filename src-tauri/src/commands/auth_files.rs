@@ -25,6 +25,13 @@ fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
     Some(candidates)
 }
 
+fn auth_file_delete_url(port: u16, filename: &str) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(&get_management_url(port, "auth-files"))
+        .map_err(|error| format!("Failed to build auth file delete URL: {error}"))?;
+    url.query_pairs_mut().append_pair("name", filename);
+    Ok(url)
+}
+
 async fn read_local_auth_file(filename: &str) -> Option<Vec<u8>> {
     let candidates = local_auth_file_candidates(filename)?;
     tokio::task::spawn_blocking(move || {
@@ -281,15 +288,11 @@ pub async fn delete_auth_file(state: State<'_, AppState>, file_id: String) -> Re
 
     // Otherwise try to delete via API
     let port = state.config.lock().unwrap().port;
-    let url = format!(
-        "{}?name={}",
-        get_management_url(port, "auth-files"),
-        file_id
-    );
+    let url = auth_file_delete_url(port, &file_id)?;
 
     let client = build_management_client();
     let response = client
-        .delete(&url)
+        .delete(url)
         .header("X-Management-Key", &get_management_key())
         .send()
         .await
@@ -543,7 +546,7 @@ pub async fn batch_delete_auth_files(
 
 #[cfg(test)]
 mod tests {
-    use super::local_auth_file_candidates;
+    use super::{auth_file_delete_url, local_auth_file_candidates};
 
     #[test]
     fn local_candidates_reject_path_traversal() {
@@ -559,6 +562,18 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|path| path.ends_with("codex-account.json.disabled")));
+    }
+
+    #[test]
+    fn delete_url_preserves_plus_in_auth_filename() {
+        let filename = "codex-user+tag@example.com-plus.json";
+        let url = auth_file_delete_url(8317, filename).unwrap();
+
+        assert!(url.as_str().contains("user%2Btag"));
+        assert_eq!(
+            url.query_pairs().find(|(key, _)| key == "name").unwrap().1,
+            filename
+        );
     }
 }
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
+import {
+  filterCodexQuotaAccounts,
+  getCodexRateLimits,
+  isCodexQuotaExhausted,
+  isCodexQuotaInvalidated,
+} from "./codexQuota";
 
 import type { CodexQuotaResult } from "../../../lib/tauri";
 
@@ -63,5 +68,36 @@ describe("isCodexQuotaExhausted", () => {
 
   it("keeps accounts visible while all windows have remaining quota", () => {
     expect(isCodexQuotaExhausted({ ...baseAccount, primaryUsedPercent: 99.9 })).toBe(false);
+  });
+});
+
+describe("isCodexQuotaInvalidated", () => {
+  it("excludes token-invalidated API responses from quota", () => {
+    expect(
+      isCodexQuotaInvalidated({
+        ...baseAccount,
+        error:
+          'API error 401 Unauthorized: {"error":{"message":"Your authentication token has been invalidated. Please try signing in again.","type":"invalid_request_error","code":"token_invalidated"}}',
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps other API errors visible", () => {
+    expect(
+      isCodexQuotaInvalidated({
+        ...baseAccount,
+        error: "API error 500 Internal Server Error",
+      }),
+    ).toBe(false);
+  });
+
+  it("removes invalidated accounts from the quota collection", () => {
+    const invalidatedAccount = {
+      ...baseAccount,
+      accountKey: "invalidated.json",
+      error: 'API error 401: {"code":"token_invalidated"}',
+    };
+
+    expect(filterCodexQuotaAccounts([baseAccount, invalidatedAccount])).toEqual([baseAccount]);
   });
 });
