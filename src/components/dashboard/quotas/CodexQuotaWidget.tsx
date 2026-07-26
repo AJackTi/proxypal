@@ -2,11 +2,7 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
-import {
-  filterCodexQuotaAccounts,
-  getCodexRateLimits,
-  isCodexQuotaExhausted,
-} from "./codexQuota";
+import { filterCodexQuotaAccounts, getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
 
 const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
 
