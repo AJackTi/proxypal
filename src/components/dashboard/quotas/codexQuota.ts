@@ -26,14 +26,11 @@ export function getCodexRateLimits(account: CodexQuotaResult): CodexRateLimit[] 
   return limits;
 }
 
-export function getCodexBankResetAt(
-  account: CodexQuotaResult,
-  nowSeconds = Date.now() / 1000,
-): number | undefined {
-  return getCodexRateLimits(account)
-    .map((limit) => limit.resetAt)
-    .filter((resetAt): resetAt is number => typeof resetAt === "number" && resetAt > nowSeconds)
-    .sort((a, b) => a - b)[0];
+export function hasCodexResetCredit(account: CodexQuotaResult): boolean {
+  return (
+    typeof account.rateLimitResetCreditsAvailable === "number" &&
+    account.rateLimitResetCreditsAvailable > 0
+  );
 }
 
 /** An account is unavailable once any of its active quota windows is exhausted. */

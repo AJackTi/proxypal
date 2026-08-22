@@ -26,6 +26,7 @@ export interface CodexQuotaResult {
   planType: string;
   primaryResetAt?: number;
   primaryUsedPercent: number;
+  rateLimitResetCreditsAvailable?: number;
   secondaryResetAt?: number;
   secondaryUsedPercent?: number;
 }
@@ -72,6 +73,10 @@ export async function fetchAntigravityQuota(): Promise<AntigravityQuotaResult[]>
 
 export async function fetchCodexQuota(): Promise<CodexQuotaResult[]> {
   return invoke("fetch_codex_quota");
+}
+
+export async function consumeCodexResetCredit(accountKey: string): Promise<void> {
+  return invoke("consume_codex_reset_credit", { accountKey });
 }
 
 export async function fetchCopilotQuota(): Promise<CopilotQuotaResult[]> {

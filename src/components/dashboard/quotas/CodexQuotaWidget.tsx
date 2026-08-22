@@ -1,16 +1,19 @@
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
-import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
+import {
+  consumeCodexResetCredit,
+  type CodexQuotaResult,
+  fetchCodexQuota,
+} from "../../../lib/tauri";
 import {
   filterCodexQuotaAccounts,
-  getCodexBankResetAt,
   getCodexRateLimits,
+  hasCodexResetCredit,
   isCodexQuotaExhausted,
 } from "./codexQuota";
 
 const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
-const BANKED_RESETS_STORAGE_KEY = "proxypal-codex-banked-resets";
 
 interface CodexQuotaWidgetProps {
   authStatus: { openai: number };
@@ -48,6 +51,26 @@ function VisibilityIcon(props: VisibilityIconProps) {
   );
 }
 
+function ResetQuotaIcon() {
+  return (
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        d="M21 12a9 9 0 10-3.2 6.9"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+      />
+      <path
+        d="M21 3v6h-6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+      />
+      <circle cx="12" cy="12" r="3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" />
+    </svg>
+  );
+}
+
 // Codex Quota Widget - shows rate limits and credits for OpenAI/Codex accounts
 export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   const { t } = useI18n();
@@ -56,17 +79,13 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   const [error, setError] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal(false);
   const [hiddenAccounts, setHiddenAccounts] = createSignal<Set<string>>(new Set());
-  const [bankedResetAccounts, setBankedResetAccounts] = createSignal<Record<string, number>>({});
+  const [resettingAccountKey, setResettingAccountKey] = createSignal<string | null>(null);
+  const [confirmResetAccountKey, setConfirmResetAccountKey] = createSignal<string | null>(null);
   const [showHiddenAccounts, setShowHiddenAccounts] = createSignal(false);
 
-  const isAccountBanked = (account: CodexQuotaResult) => {
-    const resetAt = bankedResetAccounts()[account.accountKey];
-    return typeof resetAt === "number" && resetAt * 1000 > Date.now();
-  };
   const isAccountHidden = (account: CodexQuotaResult) =>
     hiddenAccounts().has(account.accountKey) ||
-    isAccountBanked(account) ||
-    isCodexQuotaExhausted(account);
+    (isCodexQuotaExhausted(account) && !hasCodexResetCredit(account));
   const hiddenAccountCount = createMemo(
     () => quotaData().filter((account) => isAccountHidden(account)).length,
   );
@@ -82,9 +101,7 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     setError(null);
     try {
       const results = await getCachedOrFetch("codex", fetchCodexQuota, forceRefresh);
-      const nextData = filterCodexQuotaAccounts(results);
-      setQuotaData(nextData);
-      pruneBankedResetAccounts(nextData);
+      setQuotaData(filterCodexQuotaAccounts(results));
     } catch (error) {
       setError(String(error));
     } finally {
@@ -105,24 +122,6 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     } catch {
       localStorage.removeItem(HIDDEN_ACCOUNTS_STORAGE_KEY);
     }
-    try {
-      const savedBankedResets = JSON.parse(
-        localStorage.getItem(BANKED_RESETS_STORAGE_KEY) ?? "{}",
-      );
-      if (savedBankedResets && typeof savedBankedResets === "object") {
-        const nowSeconds = Date.now() / 1000;
-        setBankedResetAccounts(
-          Object.fromEntries(
-            Object.entries(savedBankedResets).filter(
-              ([, resetAt]) => typeof resetAt === "number" && resetAt > nowSeconds,
-            ) as [string, number][],
-          ),
-        );
-      }
-    } catch {
-      localStorage.removeItem(BANKED_RESETS_STORAGE_KEY);
-    }
-
     if (props.authStatus.openai > 0) {
       loadQuota();
     }
@@ -141,43 +140,31 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     });
   };
 
-  const persistBankedResetAccounts = (next: Record<string, number>) => {
-    if (Object.keys(next).length === 0) {
-      localStorage.removeItem(BANKED_RESETS_STORAGE_KEY);
+  const resetQuota = async (account: CodexQuotaResult) => {
+    if (resettingAccountKey() === account.accountKey) {
       return;
     }
-    localStorage.setItem(BANKED_RESETS_STORAGE_KEY, JSON.stringify(next));
-  };
+    if (confirmResetAccountKey() !== account.accountKey) {
+      setConfirmResetAccountKey(account.accountKey);
+      window.setTimeout(() => {
+        setConfirmResetAccountKey((current) =>
+          current === account.accountKey ? null : current,
+        );
+      }, 4000);
+      return;
+    }
 
-  const pruneBankedResetAccounts = (accounts: CodexQuotaResult[]) => {
-    setBankedResetAccounts((current) => {
-      const validAccountKeys = new Set(accounts.map((account) => account.accountKey));
-      const nowSeconds = Date.now() / 1000;
-      const next = Object.fromEntries(
-        Object.entries(current).filter(
-          ([accountKey, resetAt]) => validAccountKeys.has(accountKey) && resetAt > nowSeconds,
-        ),
-      );
-      persistBankedResetAccounts(next);
-      return next;
-    });
-  };
-
-  const toggleBankReset = (account: CodexQuotaResult) => {
-    setBankedResetAccounts((current) => {
-      const next = { ...current };
-      if (isAccountBanked(account)) {
-        delete next[account.accountKey];
-      } else {
-        const resetAt = getCodexBankResetAt(account);
-        if (!resetAt) {
-          return current;
-        }
-        next[account.accountKey] = resetAt;
-      }
-      persistBankedResetAccounts(next);
-      return next;
-    });
+    setConfirmResetAccountKey(null);
+    setResettingAccountKey(account.accountKey);
+    setError(null);
+    try {
+      await consumeCodexResetCredit(account.accountKey);
+      await loadQuota(true);
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      setResettingAccountKey(null);
+    }
   };
 
   const formatResetTime = (timestamp?: number) => {
@@ -356,9 +343,7 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                     </span>
                     <Show when={isAccountHidden(account)}>
                       <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-gray-500 dark:bg-gray-600 dark:text-gray-300">
-                        {isAccountBanked(account)
-                          ? t("dashboard.quota.bankedReset")
-                          : isCodexQuotaExhausted(account)
+                        {isCodexQuotaExhausted(account)
                           ? t("dashboard.quota.percentUsed", { count: "100" })
                           : t("dashboard.quota.hidden")}
                       </span>
@@ -370,25 +355,54 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                         {t("dashboard.quota.apiError")}
                       </span>
                     </Show>
-                    <Show when={getCodexBankResetAt(account)}>
-                      {(resetAt) => (
-                        <button
-                          aria-pressed={isAccountBanked(account)}
-                          class="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-500 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-                          onClick={() => toggleBankReset(account)}
-                          title={
-                            isAccountBanked(account)
-                              ? t("dashboard.quota.clearBankReset")
-                              : t("dashboard.quota.bankResetUntil", {
-                                  time: formatResetTime(resetAt()),
-                                })
+                    <Show
+                      when={hasCodexResetCredit(account)}
+                    >
+                      <button
+                        aria-label={t("dashboard.quota.resetQuota")}
+                        aria-busy={resettingAccountKey() === account.accountKey}
+                        class={`rounded-md border border-gray-200 p-1.5 text-gray-500 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200 ${
+                          confirmResetAccountKey() === account.accountKey
+                            ? "border-amber-400 text-amber-600 dark:border-amber-500 dark:text-amber-400"
+                            : ""
+                        }`}
+                        disabled={resettingAccountKey() !== null}
+                        onClick={() => resetQuota(account)}
+                        title={
+                          confirmResetAccountKey() === account.accountKey
+                            ? t("dashboard.quota.confirmResetQuota")
+                            : t("dashboard.quota.resetQuotaWithCount", {
+                                count: String(account.rateLimitResetCreditsAvailable),
+                              })
+                        }
+                      >
+                        <Show
+                          when={resettingAccountKey() !== account.accountKey}
+                          fallback={
+                            <svg
+                              class="h-4 w-4 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                class="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                stroke-width="4"
+                              />
+                              <path
+                                class="opacity-75"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                fill="currentColor"
+                              />
+                            </svg>
                           }
                         >
-                          {isAccountBanked(account)
-                            ? t("dashboard.quota.bankedReset")
-                            : t("dashboard.quota.bankReset")}
-                        </button>
-                      )}
+                          <ResetQuotaIcon />
+                        </Show>
+                      </button>
                     </Show>
                     <button
                       aria-label={

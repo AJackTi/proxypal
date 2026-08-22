@@ -61,6 +61,8 @@ pub struct CodexQuotaResult {
     pub has_credits: bool,
     pub credits_balance: Option<f64>,
     pub credits_unlimited: bool,
+    /// Number of ChatGPT rate-limit reset credits available for this account.
+    pub rate_limit_reset_credits_available: Option<i64>,
     pub fetched_at: String,
     pub error: Option<String>,
 }

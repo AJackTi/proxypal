@@ -4,6 +4,70 @@ use crate::state::AppState;
 use crate::types::{AuthStatus, ProviderTestResult};
 use tauri::{Emitter, State};
 
+const CODEX_RESET_CREDITS_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
+const CODEX_RESET_USER_AGENT: &str =
+    "codex_cli_rs/0.76.0 (Debian 13.0.0; x86_64) WindowsTerminal";
+
+async fn refresh_codex_access_token(
+    client: &reqwest::Client,
+    refresh_token: &str,
+) -> Result<String, String> {
+    let response = client
+        .post("https://token.oaifree.com/api/auth/refresh")
+        .form(&[
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("Token refresh failed: {}", error))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Token refresh failed: {}", response.status()));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Invalid token refresh response: {}", error))?;
+    body.get("access_token")
+        .and_then(|token| token.as_str())
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "Token refresh response did not include access_token".to_string())
+}
+
+fn update_codex_access_token(path: &std::path::Path, access_token: &str) -> Result<(), String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| format!("Failed to read auth file: {}", error))?;
+    let mut auth: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| format!("Failed to parse auth file: {}", error))?;
+    auth["access_token"] = serde_json::Value::String(access_token.to_string());
+    let updated = serde_json::to_string_pretty(&auth)
+        .map_err(|error| format!("Failed to serialize auth file: {}", error))?;
+    std::fs::write(path, updated).map_err(|error| format!("Failed to update auth file: {}", error))
+}
+
+async fn post_codex_reset_credit(
+    client: &reqwest::Client,
+    access_token: &str,
+    account_id: Option<&str>,
+    redeem_request_id: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let mut request = client
+        .post(CODEX_RESET_CREDITS_URL)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .header("User-Agent", CODEX_RESET_USER_AGENT)
+        .json(&serde_json::json!({ "redeem_request_id": redeem_request_id }));
+    if let Some(account_id) = account_id.filter(|value| !value.is_empty()) {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+    request.send().await
+}
+
 // Helper function to refresh Antigravity OAuth token
 async fn refresh_antigravity_token(
     client: &reqwest::Client,
@@ -469,6 +533,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                         has_credits: false,
                         credits_balance: None,
                         credits_unlimited: false,
+                        rate_limit_reset_credits_available: None,
                         fetched_at: chrono::Local::now().to_rfc3339(),
                         error: Some("No access token found".to_string()),
                     });
@@ -520,6 +585,9 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                         let has_credits = credits["has_credits"].as_bool().unwrap_or(false);
                         let credits_balance = credits["balance"].as_f64();
                         let credits_unlimited = credits["unlimited"].as_bool().unwrap_or(false);
+                        let rate_limit_reset_credits_available = body["rate_limit_reset_credits"]
+                            ["available_count"]
+                            .as_i64();
 
                         crate::types::CodexQuotaResult {
                             account_key: cred.account_key,
@@ -532,6 +600,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                             has_credits,
                             credits_balance,
                             credits_unlimited,
+                            rate_limit_reset_credits_available,
                             fetched_at: chrono::Local::now().to_rfc3339(),
                             error: None,
                         }
@@ -549,6 +618,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                             has_credits: false,
                             credits_balance: None,
                             credits_unlimited: false,
+                            rate_limit_reset_credits_available: None,
                             fetched_at: chrono::Local::now().to_rfc3339(),
                             error: Some(format!("API error {}: {}", status, error_body)),
                         }
@@ -565,6 +635,7 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
                     has_credits: false,
                     credits_balance: None,
                     credits_unlimited: false,
+                    rate_limit_reset_credits_available: None,
                     fetched_at: chrono::Local::now().to_rfc3339(),
                     error: Some(format!("Request failed: {}", e)),
                 },
@@ -582,6 +653,76 @@ pub async fn fetch_codex_quota() -> Result<Vec<crate::types::CodexQuotaResult>, 
     }
 
     Ok(results)
+}
+
+/// Spend one ChatGPT/Codex rate-limit reset credit for a specific auth file.
+#[tauri::command]
+pub async fn consume_codex_reset_credit(account_key: String) -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    let auth_dir = home.join(".cli-proxy-api");
+    let auth_path = std::fs::read_dir(&auth_dir)
+        .map_err(|error| format!("Failed to read auth directory: {}", error))?
+        .flatten()
+        .find(|entry| entry.file_name().to_string_lossy() == account_key)
+        .map(|entry| entry.path())
+        .ok_or_else(|| format!("Codex auth file not found: {}", account_key))?;
+
+    let content = std::fs::read_to_string(&auth_path)
+        .map_err(|error| format!("Failed to read auth file: {}", error))?;
+    let auth: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| format!("Failed to parse auth file: {}", error))?;
+    let refresh_token = auth["refresh_token"].as_str().map(str::to_string);
+    let account_id = auth["account_id"].as_str().map(str::to_string);
+    let mut access_token = auth["access_token"]
+        .as_str()
+        .filter(|token| !token.is_empty())
+        .ok_or("Auth file does not contain access_token")?
+        .to_string();
+    let redeem_request_id = uuid::Uuid::new_v4().to_string();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|error| format!("Failed to create HTTP client: {}", error))?;
+
+    let response = post_codex_reset_credit(
+        &client,
+        &access_token,
+        account_id.as_deref(),
+        &redeem_request_id,
+    )
+    .await
+    .map_err(|error| format!("Reset request failed: {}", error))?;
+
+    let response = if response.status() == reqwest::StatusCode::UNAUTHORIZED
+        || response.status() == reqwest::StatusCode::FORBIDDEN
+    {
+        let refresh_token = refresh_token.ok_or("Account needs to be re-authorized")?;
+        access_token = refresh_codex_access_token(&client, &refresh_token).await?;
+        update_codex_access_token(&auth_path, &access_token)?;
+        post_codex_reset_credit(
+            &client,
+            &access_token,
+            account_id.as_deref(),
+            &redeem_request_id,
+        )
+        .await
+        .map_err(|error| format!("Reset request failed after token refresh: {}", error))?
+    } else {
+        response
+    };
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let detail: String = body.trim().chars().take(240).collect();
+        if detail.is_empty() {
+            Err(format!("ChatGPT quota reset failed ({})", status))
+        } else {
+            Err(format!("ChatGPT quota reset failed ({}): {}", status, detail))
+        }
+    }
 }
 
 // Fetch Copilot/GitHub quota for all authenticated accounts
