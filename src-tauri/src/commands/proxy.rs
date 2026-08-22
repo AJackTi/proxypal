@@ -8,8 +8,7 @@ use crate::get_management_key;
 use crate::helpers::log_watcher::start_log_watcher;
 use crate::state::AppState;
 use crate::types::ProxyStatus;
-use crate::GPT5_BASE_MODELS;
-use crate::GPT5_REASONING_SUFFIXES;
+use crate::{gpt5_reasoning_suffixes, GPT5_BASE_MODELS};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -74,6 +73,7 @@ fn build_proxy_config_yaml(
     let claude_api_key_section = build_claude_api_key_section(config);
     let gemini_api_key_section = build_gemini_api_key_section(config);
     let codex_api_key_section = build_codex_api_key_section(config);
+    let xai_api_key_section = build_xai_api_key_section(config);
     let vertex_api_key_section = build_vertex_api_key_section(config);
     let (thinking_budget, thinking_mode_display) = resolve_thinking_budget(config);
     let payload_section = build_payload_section(config, thinking_budget, thinking_mode_display);
@@ -95,6 +95,8 @@ logging-to-file: {}
 logs-max-total-size-mb: {}
 request-retry: {}
 max-retry-interval: {}
+max-retry-credentials: {}
+disable-cooling: {}
 {}
 # Quota exceeded behavior
 quota-exceeded:
@@ -107,7 +109,7 @@ remote-management:
   secret-key: "{}"
   disable-control-panel: {}
 
-{}{}{}{}{}{}{}# Additional settings
+{}{}{}{}{}{}{}{}# Additional settings
 request-log: {}
 commercial-mode: {}
 ws-auth: {}
@@ -123,6 +125,8 @@ ws-auth: {}
         config.logs_max_total_size_mb,
         config.request_retry,
         config.max_retry_interval,
+        config.max_retry_credentials,
+        config.disable_cooling,
         proxy_url_line,
         config.quota_switch_project,
         config.quota_switch_preview_model,
@@ -132,6 +136,7 @@ ws-auth: {}
         claude_api_key_section,
         gemini_api_key_section,
         codex_api_key_section,
+        xai_api_key_section,
         vertex_api_key_section,
         routing_section,
         payload_section,
@@ -245,7 +250,7 @@ fn build_copilot_openai_entry(copilot: &crate::types::copilot::CopilotConfig) ->
     for model in GPT5_BASE_MODELS {
         entry.push_str(&format!("      - alias: \"{}\"\n", model));
         entry.push_str(&format!("        name: \"{}\"\n", model));
-        for suffix in GPT5_REASONING_SUFFIXES {
+        for suffix in gpt5_reasoning_suffixes(model) {
             let suffixed = format!("{}({})", model, suffix);
             entry.push_str(&format!("      - alias: \"{}\"\n", suffixed));
             entry.push_str(&format!("        name: \"{}\"\n", suffixed));
@@ -285,6 +290,9 @@ fn build_claude_api_key_section(config: &AppConfig) -> String {
     let mut entries: Vec<String> = Vec::new();
     for key in &config.claude_api_keys {
         let mut entry = format!("  - api-key: \"{}\"\n", key.api_key);
+        if let Some(retry) = key.request_retry {
+            entry.push_str(&format!("    request-retry: {}\n", retry));
+        }
         if let Some(ref base_url) = key.base_url {
             entry.push_str(&format!("    base-url: \"{}\"\n", base_url));
         }
@@ -315,6 +323,9 @@ fn build_gemini_api_key_section(config: &AppConfig) -> String {
     let mut section = String::from("# Gemini API keys\ngemini-api-key:\n");
     for key in &config.gemini_api_keys {
         section.push_str(&format!("  - api-key: \"{}\"\n", key.api_key));
+        if let Some(retry) = key.request_retry {
+            section.push_str(&format!("    request-retry: {}\n", retry));
+        }
         section.push_str("    signature-cache: false\n");
         if let Some(ref base_url) = key.base_url {
             section.push_str(&format!("    base-url: \"{}\"\n", base_url));
@@ -336,6 +347,9 @@ fn build_codex_api_key_section(config: &AppConfig) -> String {
     let mut section = String::from("# Codex API keys\ncodex-api-key:\n");
     for key in &config.codex_api_keys {
         section.push_str(&format!("  - api-key: \"{}\"\n", key.api_key));
+        if let Some(retry) = key.request_retry {
+            section.push_str(&format!("    request-retry: {}\n", retry));
+        }
         if let Some(ref base_url) = key.base_url {
             section.push_str(&format!("    base-url: \"{}\"\n", base_url));
         }
@@ -349,6 +363,44 @@ fn build_codex_api_key_section(config: &AppConfig) -> String {
     section
 }
 
+fn build_xai_api_key_section(config: &AppConfig) -> String {
+    if config.xai_api_keys.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from("# xAI API keys\nxai-api-key:\n");
+    for key in &config.xai_api_keys {
+        section.push_str(&format!("  - api-key: \"{}\"\n", key.api_key));
+        if let Some(retry) = key.request_retry {
+            section.push_str(&format!("    request-retry: {}\n", retry));
+        }
+        section.push_str(&format!("    base-url: \"{}\"\n", key.base_url));
+        if let Some(ref proxy_url) = key.proxy_url {
+            if !proxy_url.is_empty() {
+                section.push_str(&format!("    proxy-url: \"{}\"\n", proxy_url));
+            }
+        }
+        if let Some(ref prefix) = key.prefix {
+            if !prefix.is_empty() {
+                section.push_str(&format!("    prefix: \"{}\"\n", prefix));
+            }
+        }
+        if let Some(ref headers) = key.headers {
+            if !headers.is_empty() {
+                section.push_str("    headers:\n");
+                for (name, value) in headers {
+                    section.push_str(&format!("      {}: \"{}\"\n", name, value));
+                }
+            }
+        }
+        if let Some(websockets) = key.websockets {
+            section.push_str(&format!("    websockets: {}\n", websockets));
+        }
+    }
+    section.push('\n');
+    section
+}
+
 fn build_vertex_api_key_section(config: &AppConfig) -> String {
     if config.vertex_api_keys.is_empty() {
         return String::new();
@@ -356,6 +408,9 @@ fn build_vertex_api_key_section(config: &AppConfig) -> String {
     let mut section = String::from("# Vertex API keys\nvertex-api-key:\n");
     for key in &config.vertex_api_keys {
         section.push_str(&format!("  - api-key: \"{}\"\n", key.api_key));
+        if let Some(retry) = key.request_retry {
+            section.push_str(&format!("    request-retry: {}\n", retry));
+        }
         if let Some(ref project_id) = key.project_id {
             if !project_id.is_empty() {
                 section.push_str(&format!("    project-id: \"{}\"\n", project_id));
@@ -511,6 +566,10 @@ fn build_gemini_override_section(thinking_level: &str) -> String {
         - name: "gemini-3.5-flash-low*"
       params:
         generationConfig.thinkingConfig.thinkingLevel: "low"
+    - models:
+        - name: "gemini-3.6-flash-high*"
+      params:
+        generationConfig.thinkingConfig.thinkingLevel: "high"
 "#,
         thinking_level
     )
@@ -977,5 +1036,167 @@ mod tests {
             "Expected host: \"127.0.0.1\", got:\n{}",
             yaml
         );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_forces_high_thinking_for_gemini_3_6_flash_high() {
+        let config = crate::config::AppConfig::default();
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-gemini-3-6");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        let (_, override_rule) = yaml
+            .split_once("name: \"gemini-3.6-flash-high*\"")
+            .expect("expected a Gemini 3.6 high override");
+        assert!(override_rule.contains("generationConfig.thinkingConfig.thinkingLevel: \"high\""));
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_includes_xai_api_key_entries() {
+        let mut config = crate::config::AppConfig::default();
+        config.xai_api_keys.push(crate::types::XaiApiKey {
+            api_key: "xai-test-key".to_string(),
+            base_url: "https://api.x.ai/v1".to_string(),
+            prefix: Some("xai".to_string()),
+            ..Default::default()
+        });
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-xai");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        assert!(yaml.contains("# xAI API keys\nxai-api-key:"));
+        assert!(yaml.contains("api-key: \"xai-test-key\""));
+        assert!(yaml.contains("base-url: \"https://api.x.ai/v1\""));
+        assert!(yaml.contains("prefix: \"xai\""));
+    }
+
+    #[test]
+    fn copilot_config_includes_gpt_5_6_specific_reasoning_aliases() {
+        let yaml = build_copilot_openai_entry(&crate::types::copilot::CopilotConfig::default());
+
+        for alias in [
+            "gpt-5.6-terra",
+            "gpt-5.6-terra(max)",
+            "gpt-5.6-terra(ultra)",
+            "gpt-5.6-luna(max)",
+            "gpt-5.6-sol(ultra)",
+        ] {
+            assert!(
+                yaml.contains(&format!("alias: \"{}\"", alias)),
+                "missing {alias}"
+            );
+        }
+        assert!(
+            !yaml.contains("gpt-5.5(max)"),
+            "GPT-5.6-only effort levels must not be mapped for older GPT-5 models"
+        );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_emits_per_credential_request_retry() {
+        let mut config = crate::config::AppConfig::default();
+        config.claude_api_keys.push(crate::types::ClaudeApiKey {
+            api_key: "claude-k".to_string(),
+            request_retry: Some(2),
+            ..Default::default()
+        });
+        config.gemini_api_keys.push(crate::types::GeminiApiKey {
+            api_key: "gemini-k".to_string(),
+            request_retry: Some(3),
+            ..Default::default()
+        });
+        config.codex_api_keys.push(crate::types::CodexApiKey {
+            api_key: "codex-k".to_string(),
+            request_retry: Some(0),
+            ..Default::default()
+        });
+        config.xai_api_keys.push(crate::types::XaiApiKey {
+            api_key: "xai-k".to_string(),
+            base_url: "https://api.x.ai/v1".to_string(),
+            request_retry: Some(4),
+            ..Default::default()
+        });
+        config.vertex_api_keys.push(crate::types::VertexApiKey {
+            api_key: "vertex-k".to_string(),
+            request_retry: Some(5),
+            ..Default::default()
+        });
+
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-retry");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        let claude = yaml
+            .split_once("claude-api-key:")
+            .expect("claude section")
+            .1
+            .split_once("gemini-api-key:")
+            .expect("gemini section")
+            .0;
+        assert!(claude.contains("request-retry: 2"), "claude:\n{claude}");
+
+        let gemini = yaml
+            .split_once("gemini-api-key:")
+            .expect("gemini section")
+            .1
+            .split_once("codex-api-key:")
+            .expect("codex section")
+            .0;
+        assert!(gemini.contains("request-retry: 3"), "gemini:\n{gemini}");
+
+        let codex = yaml
+            .split_once("codex-api-key:")
+            .expect("codex section")
+            .1
+            .split_once("xai-api-key:")
+            .expect("xai section")
+            .0;
+        assert!(
+            codex.contains("request-retry: 0"),
+            "codex (0 disables):\n{codex}"
+        );
+
+        let xai = yaml
+            .split_once("xai-api-key:")
+            .expect("xai section")
+            .1
+            .split_once("vertex-api-key:")
+            .expect("vertex section")
+            .0;
+        assert!(xai.contains("request-retry: 4"), "xai:\n{xai}");
+
+        let vertex = yaml
+            .split_once("vertex-api-key:")
+            .expect("vertex section")
+            .1;
+        assert!(vertex.contains("request-retry: 5"), "vertex:\n{vertex}");
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_omits_request_retry_when_unset() {
+        let config = crate::config::AppConfig::default();
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-retry-none");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        assert!(yaml.contains("request-retry: 0\n"));
+        assert_eq!(
+            yaml.matches("request-retry: ").count(),
+            1,
+            "only the global knob"
+        );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_emits_retry_knobs() {
+        let mut config = crate::config::AppConfig::default();
+        config.max_retry_credentials = 3;
+        config.disable_cooling = true;
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-knobs");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        assert!(yaml.contains("max-retry-credentials: 3"));
+        assert!(yaml.contains("disable-cooling: true"));
     }
 }

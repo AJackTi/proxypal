@@ -875,10 +875,16 @@ fn configure_opencode_agent(
     let mut opencode_models = models.to_vec();
 
     // The OpenCode reconfigure button writes ~/.config/opencode/opencode.json from the
-    // backend model list. Ensure newly released GPT-5.5 aliases are present even when
-    // the running sidecar's /v1/models response is stale, because ProxyPal's generated
-    // proxy config can route these GPT-5 reasoning aliases through the proxypal provider.
-    for model_id in ["gpt-5.5", "gpt-5.5-fast"] {
+    // backend model list. Ensure recent GPT-5 aliases are present even when the running
+    // sidecar's /v1/models response is stale, because ProxyPal's generated proxy config
+    // can route them through the proxypal provider.
+    for model_id in [
+        "gpt-5.5",
+        "gpt-5.5-fast",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+    ] {
         if !opencode_models.iter().any(|m| m.id == model_id) {
             opencode_models.push(AvailableModel {
                 id: model_id.to_string(),
@@ -898,7 +904,9 @@ fn configure_opencode_agent(
         // Check if this is a GPT-5.x model (Codex reasoning models)
         let is_gpt5_model = m.id.starts_with("gpt-5");
         // Check if this is a Gemini 3 model (native thinking support)
-        let is_gemini3_model = (m.id.starts_with("gemini-3-") || m.id.starts_with("gemini-3.1-"))
+        let is_gemini3_model = (m.id.starts_with("gemini-3-")
+            || m.id.starts_with("gemini-3.1-")
+            || m.id.starts_with("gemini-3.6-"))
             && !m.id.contains("image");
         // Check if this is a Qwen3 or DeepSeek model with thinking support
         let is_qwen3_thinking = m.id.contains("qwen3") && m.id.contains("thinking");
@@ -920,6 +928,7 @@ fn configure_opencode_agent(
             || m.id.starts_with("gemini-2.5-")
             || (m.id.starts_with("gemini-3-") && !m.id.contains("image"))
             || (m.id.starts_with("gemini-3.1-") && !m.id.contains("image"))
+            || (m.id.starts_with("gemini-3.6-") && !m.id.contains("image"))
             || m.id.starts_with("gpt-4o")
             || m.id.starts_with("gpt-4.1")
             || m.id.starts_with("gpt-5")
@@ -1580,6 +1589,71 @@ mod tests {
             assert!(
                 wsl_detection_opt_in(Some(value)),
                 "expected {value} to enable WSL detection"
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_config_enables_gemini_3_6_flash_high_capabilities() {
+        let home =
+            std::env::temp_dir().join(format!("proxypal-gemini-3-6-test-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&home);
+
+        configure_opencode_agent(
+            &home,
+            "http://127.0.0.1:8317",
+            "http://127.0.0.1:8317/v1",
+            &[crate::types::AvailableModel {
+                id: "gemini-3.6-flash-high".to_string(),
+                owned_by: "antigravity".to_string(),
+                source: "antigravity".to_string(),
+            }],
+            32768,
+            "high",
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join(".config/opencode/opencode.json")).unwrap(),
+        )
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+        let model = &config["provider"]["proxypal"]["models"]["gemini-3.6-flash-high"];
+
+        assert_eq!(model["reasoning"], true);
+        assert_eq!(
+            model["options"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "high"
+        );
+        assert_eq!(
+            model["modalities"]["input"],
+            serde_json::json!(["text", "image", "pdf"])
+        );
+    }
+
+    #[test]
+    fn opencode_fallback_includes_gpt_5_6_models() {
+        let home =
+            std::env::temp_dir().join(format!("proxypal-opencode-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+
+        configure_opencode_agent(
+            &home,
+            "http://127.0.0.1:8317",
+            "http://127.0.0.1:8317/v1",
+            &[],
+            8192,
+            "high",
+        )
+        .unwrap();
+
+        let config = std::fs::read_to_string(home.join(".config/opencode/opencode.json")).unwrap();
+        let _ = std::fs::remove_dir_all(&home);
+
+        for model in ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.6-sol"] {
+            assert!(
+                config.contains(model),
+                "missing OpenCode fallback for {model}"
             );
         }
     }

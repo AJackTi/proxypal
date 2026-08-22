@@ -14,6 +14,7 @@ export interface GeminiApiKey {
   headers?: Record<string, string>;
   prefix?: string;
   proxyUrl?: string;
+  requestRetry?: number;
 }
 
 // Claude API Key structure
@@ -25,6 +26,7 @@ export interface ClaudeApiKey {
   models?: ModelMapping[];
   prefix?: string;
   proxyUrl?: string;
+  requestRetry?: number;
 }
 
 // Codex API Key structure
@@ -34,6 +36,33 @@ export interface CodexApiKey {
   headers?: Record<string, string>;
   prefix?: string;
   proxyUrl?: string;
+  requestRetry?: number;
+}
+
+export interface XaiApiKey {
+  apiKey: string;
+  baseUrl: string;
+  headers?: Record<string, string>;
+  prefix?: string;
+  proxyUrl?: string;
+  requestRetry?: number;
+  websockets?: boolean;
+}
+
+export async function getXaiApiKeys(): Promise<XaiApiKey[]> {
+  return invoke("get_xai_api_keys");
+}
+
+export async function setXaiApiKeys(keys: XaiApiKey[]): Promise<void> {
+  return invoke("set_xai_api_keys", { keys });
+}
+
+export async function addXaiApiKey(key: XaiApiKey): Promise<void> {
+  return invoke("add_xai_api_key", { key });
+}
+
+export async function deleteXaiApiKey(index: number): Promise<void> {
+  return invoke("delete_xai_api_key", { index });
 }
 
 // OpenAI-Compatible Provider structure
@@ -112,6 +141,7 @@ export interface VertexApiKey {
   location?: string;
   prefix?: string;
   projectId?: string;
+  requestRetry?: number;
 }
 
 export async function getVertexApiKeys(): Promise<VertexApiKey[]> {

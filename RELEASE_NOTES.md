@@ -1,3 +1,117 @@
+# ProxyPal v0.4.52
+
+**Released:** 2026-08-21
+
+## CLIProxyAPI v7.2.138
+
+- Updates the pinned mainline sidecar from v7.2.135 to v7.2.138 across local development, CI, and release builds.
+- Adds OAuth request-scoped error rules, namespace-aware OpenAI Responses tool resolution for Gemini with custom tool call conversion, and opt-in Codex stream bootstrap buffering with overload failover.
+- Includes upstream fixes for Claude long global cooldowns on Fable-only rate limits, `message.reasoning_content` thinking conversion, Gemini thought-signature preservation/sanitization (including Vertex) and deterministic tool-call IDs, `max_completion_tokens` to Antigravity `maxOutputTokens` mapping, xAI `response.incomplete` terminal handling, base_URL-only credentials with stale auth-header skipping, protocol-aware plugin usage parsing, and warn-level cooldown/upstream diagnostics.
+
+---
+
+# ProxyPal v0.4.51
+
+**Released:** 2026-08-18
+
+## CLIProxyAPI v7.2.135
+
+- Updates the pinned mainline sidecar from v7.2.131 to v7.2.135 across local development, CI, and release builds.
+- Includes GPT-5.6 Sol Work Mode model registrations and context-limit updates, `max_completion_tokens` in model definitions, stream error preservation, OpenAI `service_tier` to Claude `speed` mapping, antigravity schema fixes, and a cooling management refactor.
+
+## Release automation
+
+- The publish job now verifies the release's tag identity before publishing and retargets it if GitHub assigned an `untagged-*` ref, failing closed when the tag does not exist. Previous releases (v0.4.45/49/50) shipped untagged and required manual retargeting.
+
+---
+
+# ProxyPal v0.4.50
+
+**Released:** 2026-08-14
+
+## CLIProxyAPI v7.2.131
+
+- Updates the pinned mainline sidecar from v7.2.125 to v7.2.131 across local development, CI, and release builds.
+- Includes upstream fixes for premature SSE stream termination, DeepSeek key rotation on insufficient balance, and Codex session normalization, plus replay-index and connection-reuse performance work.
+- Adds support for per-credential `request-retry` overrides (API-key entries and OAuth/token files) and static model definitions with modality metadata.
+
+## Available Models registry
+
+- Available Models now enriches listings from the sidecar's static model registry: real display names, context windows, thinking support, and non-text modality badges (image/audio/video) instead of ID-string heuristics.
+- Adds `get_model_definitions` management command backed by fixture and round-trip tests; sidecar snake_case payloads deserialize with asymmetric renames and serialize camelCase to the frontend.
+
+## Per-credential retry and retry knobs
+
+- Adds an optional per-key Request Retry setting to all five API-key providers (Claude, Gemini, Codex, xAI, Vertex): 0 disables retries for that key, empty uses the global setting.
+- Adds Max Retry Credentials (maximum credentials tried per failed request; 0 = try all) and Disable Cooling (skip auth/model cooldown scheduling) to Proxy Settings.
+- New AppConfig fields are serde-defaulted so existing configs load unchanged.
+
+## Dependency refresh
+
+- Updates solid-js from 1.9.11 to 1.9.14 (patch-level fixes within v1).
+
+---
+
+# ProxyPal v0.4.49
+
+**Released:** 2026-08-10
+
+## CLIProxyAPI v7.2.125
+
+- Updates the pinned mainline sidecar from v7.2.95 to v7.2.125 across local development, CI, and release builds.
+- Includes upstream reliability, translation, routing, OAuth refresh, session persistence, and large-payload performance improvements.
+- Adds smoke coverage for stable management contracts covering configuration, usage, logging, auth files, and authenticated error handling. The local macOS ARM run passed; other release platforms remain CI gates.
+
+## Routing and release safety
+
+- Adds weighted round-robin routing alongside the existing round-robin and fill-first strategies.
+- Generates sidecar release notes from the exact bundled tag instead of whichever upstream release is latest when publishing runs.
+- Removes legacy unpinned sidecar download fallbacks so local builds use the checksum-verifying pinned updater.
+
+## Dashboard and maintenance
+
+- Temporarily hides the Polime dashboard promotion while retaining its localized copy and asset for restoration.
+- Removes verified unused frontend packages and keeps Fallow dependency checks free of actionable dead-code findings.
+
+---
+
+# ProxyPal v0.4.48
+
+**Released:** 2026-07-22
+
+## Gemini reliability
+
+- Adds Antigravity support for `gemini-3.6-flash-high`, including fixed high-thinking configuration, OpenCode reasoning/multimodal capabilities, and quota labeling.
+- Replaces the unavailable Gemini CLI OAuth flow with clear API Keys setup guidance, avoiding the sidecar’s 404 management endpoint.
+
+## CLIProxyAPI v7.2.95
+
+- Updates the pinned mainline sidecar from v7.2.93 to v7.2.95 across local development, CI, and release builds.
+- Includes upstream OpenAI translator tool-handling optimization, improved xAI token counting, Claude input-token estimation, and Codex Alpha Search routing.
+
+---
+
+# ProxyPal v0.4.47
+
+**Released:** 2026-07-21
+
+## CLIProxyAPI v7.2.93
+
+- Updates the pinned CLIProxyAPI sidecar from v7.2.61 to v7.2.93 across local development, CI, and release builds.
+- Verifies the macOS ARM sidecar download against its upstream SHA-256 checksum and exercises the authenticated management API smoke test.
+- Replaces Auth Files JSON string rewriting with typed decoding that accepts both camelCase and CLIProxyAPI snake_case fields.
+
+## GPT-5.6 and xAI
+
+- Adds GPT-5.6 Terra, Luna, and Sol model aliases, including their GPT-5.6-only `max` and `ultra` reasoning variants.
+- Adds native xAI API-key management for Grok: configure a key, endpoint, and optional prefix in the API Keys page; configuration persists across proxy restarts.
+
+## Deferred upstream interfaces
+
+- CLIProxyAPI v7.2.93 does not expose model display names, cache-write tokens, service tiers, or active WebSocket sessions through a stable management API. ProxyPal retains its local model-name heuristic and existing usage analytics until those interfaces are available.
+
+---
+
 # ProxyPal v0.4.46
 
 **Released:** 2026-07-10

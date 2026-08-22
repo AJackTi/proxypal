@@ -1,34 +1,30 @@
 import { createEffect, createMemo, createSignal, For, Show, splitProps } from "solid-js";
 import { useI18n } from "../../i18n";
-import { getCodexApiKeys, setCodexApiKeys } from "../../lib/tauri";
+import { getXaiApiKeys, setXaiApiKeys } from "../../lib/tauri";
 import { appStore } from "../../stores/app";
 import { toastStore } from "../../stores/toast";
 import { Button } from "../ui";
 
-import type { CodexApiKey } from "../../lib/tauri";
+import type { XaiApiKey } from "../../lib/tauri";
 
-interface CodexKeysTabProps {
+interface XaiKeysTabProps {
   loading: () => boolean;
   setLoading: (value: boolean) => void;
   setShowAddForm: (value: boolean) => void;
   showAddForm: () => boolean;
 }
 
-export function CodexKeysTab(props: CodexKeysTabProps) {
+const XAI_BASE_URL = "https://api.x.ai/v1";
+
+export function XaiKeysTab(props: XaiKeysTabProps) {
   const [local] = splitProps(props, ["showAddForm", "setShowAddForm", "loading", "setLoading"]);
   const { t } = useI18n();
-  const { proxyStatus } = appStore;
-  const [codexKeys, setCodexKeys] = createSignal<CodexApiKey[]>([]);
-  const [newCodexKey, setNewCodexKey] = createSignal<CodexApiKey>({
+  const { proxyStatus, setConfig } = appStore;
+  const [xaiKeys, setXaiKeys] = createSignal<XaiApiKey[]>([]);
+  const [newXaiKey, setNewXaiKey] = createSignal<XaiApiKey>({
     apiKey: "",
+    baseUrl: XAI_BASE_URL,
   });
-
-  const maskApiKey = (key: string) => {
-    if (key.length <= 8) {
-      return "****";
-    }
-    return `${key.slice(0, 4)}...${key.slice(-4)}`;
-  };
 
   const loadKeys = async () => {
     if (!proxyStatus().running) {
@@ -37,10 +33,9 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
 
     local.setLoading(true);
     try {
-      const codex = await getCodexApiKeys();
-      setCodexKeys(codex);
+      setXaiKeys(await getXaiApiKeys());
     } catch (error) {
-      console.error("Failed to load Codex API keys:", error);
+      console.error("Failed to load xAI API keys:", error);
       toastStore.error(t("apiKeys.toasts.failedToLoadApiKeys"), String(error));
     } finally {
       local.setLoading(false);
@@ -53,21 +48,26 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
     }
   });
 
-  const handleAddCodexKey = async () => {
-    const key = newCodexKey();
+  const handleAddXaiKey = async () => {
+    const key = newXaiKey();
     if (!key.apiKey.trim()) {
       toastStore.error(t("apiKeys.toasts.apiKeyRequired"));
+      return;
+    }
+    if (!key.baseUrl.trim()) {
+      toastStore.error(t("apiKeys.toasts.baseUrlRequired"));
       return;
     }
 
     local.setLoading(true);
     try {
-      const updated = [...codexKeys(), key];
-      await setCodexApiKeys(updated);
-      setCodexKeys(updated);
-      setNewCodexKey({ apiKey: "" });
+      const updated = [...xaiKeys(), key];
+      await setXaiApiKeys(updated);
+      setConfig({ ...appStore.config(), xaiApiKeys: updated });
+      setXaiKeys(updated);
+      setNewXaiKey({ apiKey: "", baseUrl: XAI_BASE_URL });
       local.setShowAddForm(false);
-      toastStore.success(t("apiKeys.toasts.apiKeyAdded", { provider: "Codex" }));
+      toastStore.success(t("apiKeys.toasts.apiKeyAdded", { provider: "xAI" }));
     } catch (error) {
       toastStore.error(t("apiKeys.toasts.failedToAddKey"), String(error));
     } finally {
@@ -75,13 +75,14 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
     }
   };
 
-  const handleDeleteCodexKey = async (index: number) => {
+  const handleDeleteXaiKey = async (index: number) => {
     local.setLoading(true);
     try {
-      const updated = codexKeys().filter((_, i) => i !== index);
-      await setCodexApiKeys(updated);
-      setCodexKeys(updated);
-      toastStore.success(t("apiKeys.toasts.apiKeyDeleted", { provider: "Codex" }));
+      const updated = xaiKeys().filter((_, i) => i !== index);
+      await setXaiApiKeys(updated);
+      setConfig({ ...appStore.config(), xaiApiKeys: updated });
+      setXaiKeys(updated);
+      toastStore.success(t("apiKeys.toasts.apiKeyDeleted", { provider: "xAI" }));
     } catch (error) {
       toastStore.error(t("apiKeys.toasts.failedToDeleteKey"), String(error));
     } finally {
@@ -91,40 +92,28 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
 
   const showEmptyState = createMemo(
     () =>
-      proxyStatus().running && !local.loading() && codexKeys().length === 0 && !local.showAddForm(),
+      proxyStatus().running && !local.loading() && xaiKeys().length === 0 && !local.showAddForm(),
   );
 
   return (
     <div class="space-y-4">
-      <Show when={codexKeys().length > 0}>
+      <Show when={xaiKeys().length > 0}>
         <div class="space-y-2">
-          <For each={codexKeys()}>
+          <For each={xaiKeys()}>
             {(key, index) => (
               <div class="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
                 <div class="min-w-0 flex-1">
                   <code class="font-mono text-sm text-gray-700 dark:text-gray-300">
-                    {maskApiKey(key.apiKey)}
+                    {key.apiKey.length <= 8
+                      ? "****"
+                      : `${key.apiKey.slice(0, 4)}...${key.apiKey.slice(-4)}`}
                   </code>
-                  <Show when={key.baseUrl}>
-                    <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                      {key.baseUrl}
-                    </p>
-                  </Show>
+                  <p class="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                    {key.baseUrl}
+                  </p>
                 </div>
-                <Button onClick={() => handleDeleteCodexKey(index())} size="sm" variant="ghost">
-                  <svg
-                    class="h-4 w-4 text-red-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                    />
-                  </svg>
+                <Button onClick={() => handleDeleteXaiKey(index())} size="sm" variant="ghost">
+                  <span aria-label={t("authFiles.actions.delete")}>×</span>
                 </Button>
               </div>
             )}
@@ -140,32 +129,22 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
             </span>
             <input
               class="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"
-              onInput={(e) =>
-                setNewCodexKey({
-                  ...newCodexKey(),
-                  apiKey: e.currentTarget.value,
-                })
-              }
-              placeholder={t("apiKeys.placeholders.codexApiKey")}
+              onInput={(e) => setNewXaiKey({ ...newXaiKey(), apiKey: e.currentTarget.value })}
+              placeholder={t("apiKeys.placeholders.xaiApiKey")}
               type="password"
-              value={newCodexKey().apiKey}
+              value={newXaiKey().apiKey}
             />
           </label>
           <label class="block">
             <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {t("apiKeys.labels.baseUrlOptional")}
+              {t("apiKeys.labels.baseUrlRequired")}
             </span>
             <input
               class="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"
-              onInput={(e) =>
-                setNewCodexKey({
-                  ...newCodexKey(),
-                  baseUrl: e.currentTarget.value || undefined,
-                })
-              }
-              placeholder={t("apiKeys.placeholders.codexBaseUrl")}
-              type="text"
-              value={newCodexKey().baseUrl || ""}
+              onInput={(e) => setNewXaiKey({ ...newXaiKey(), baseUrl: e.currentTarget.value })}
+              placeholder={t("apiKeys.placeholders.xaiBaseUrl")}
+              type="url"
+              value={newXaiKey().baseUrl}
             />
           </label>
           <label class="block">
@@ -175,14 +154,11 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
             <input
               class="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"
               onInput={(e) =>
-                setNewCodexKey({
-                  ...newCodexKey(),
-                  prefix: e.currentTarget.value || undefined,
-                })
+                setNewXaiKey({ ...newXaiKey(), prefix: e.currentTarget.value || undefined })
               }
-              placeholder={t("apiKeys.placeholders.codexPrefix")}
+              placeholder={t("apiKeys.placeholders.xaiPrefix")}
               type="text"
-              value={newCodexKey().prefix || ""}
+              value={newXaiKey().prefix || ""}
             />
           </label>
           <label class="block">
@@ -193,8 +169,8 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
               class="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"
               min="0"
               onInput={(e) =>
-                setNewCodexKey({
-                  ...newCodexKey(),
+                setNewXaiKey({
+                  ...newXaiKey(),
                   requestRetry:
                     e.currentTarget.value === ""
                       ? undefined
@@ -203,13 +179,13 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
               }
               placeholder={t("apiKeys.placeholders.requestRetry")}
               type="number"
-              value={newCodexKey().requestRetry ?? ""}
+              value={newXaiKey().requestRetry ?? ""}
             />
           </label>
           <div class="flex gap-2 pt-2">
             <Button
               disabled={local.loading()}
-              onClick={handleAddCodexKey}
+              onClick={handleAddXaiKey}
               size="sm"
               variant="primary"
             >
@@ -229,33 +205,12 @@ export function CodexKeysTab(props: CodexKeysTabProps) {
           onClick={() => local.setShowAddForm(true)}
           variant="secondary"
         >
-          <svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              d="M12 4v16m8-8H4"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            />
-          </svg>
-          {t("apiKeys.actions.addCodexApiKey")}
+          {t("apiKeys.actions.addXaiApiKey")}
         </Button>
       </Show>
 
       <Show when={showEmptyState()}>
         <div class="py-8 text-center text-gray-500 dark:text-gray-400">
-          <svg
-            class="mx-auto mb-3 h-12 w-12 text-gray-300 dark:text-gray-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            />
-          </svg>
           <p class="text-sm">{t("apiKeys.noApiKeysConfiguredYet")}</p>
           <p class="mt-1 text-xs">{t("apiKeys.addFirstKeyHint")}</p>
         </div>

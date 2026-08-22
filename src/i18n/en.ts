@@ -117,6 +117,7 @@ export const en = {
       addOpenAiCompatibleProvider: "Add OpenAI-Compatible Provider",
       addProvider: "Add Provider",
       addVertexApiKey: "Add Vertex API Key",
+      addXaiApiKey: "Add xAI API Key",
       bulkAdd: "Bulk add",
       deleteProvider: "Delete provider",
       editProvider: "Edit provider",
@@ -145,6 +146,7 @@ export const en = {
       prefixOptional: "Prefix (optional)",
       projectIdOptional: "Project ID (optional)",
       providerNameRequired: "Provider Name *",
+      requestRetryOptional: "Request Retry (optional, 0 = no retries)",
     },
     location: "Location",
     noApiKeysConfiguredYet: "No API keys configured yet",
@@ -167,10 +169,14 @@ export const en = {
       providerBaseUrl: "https://openrouter.ai/api/v1",
       providerName: "OpenRouter",
       providerPrefix: "e.g. openrouter-prod",
+      requestRetry: "e.g. 3 (leave empty for global setting)",
       vertexApiKey: "Paste your Vertex API key...",
       vertexBaseUrl: "https://vertexai.googleapis.com",
       vertexLocation: "us-central1",
       vertexProjectId: "your-gcp-project-id",
+      xaiApiKey: "xai-...",
+      xaiBaseUrl: "https://api.x.ai/v1",
+      xaiPrefix: "e.g. xai-prod",
     },
     project: "Project",
     proxyNotRunning: "Proxy not running",
@@ -185,6 +191,7 @@ export const en = {
       apiKeyDeleted: "{{provider}} API key deleted",
       apiKeyRequired: "API key required",
       atLeastOneApiKeyRequired: "At least one API key required",
+      baseUrlRequired: "Base URL required",
       connectionFailed: "Connection failed",
       connectionSuccessful: "Connection successful",
       failedToAddKey: "Failed to add key",
@@ -680,10 +687,18 @@ export const en = {
       },
     },
     network: {
+      disableCooling: {
+        description: "Disable auth/model cooldown scheduling after failure states",
+        label: "Disable Cooling",
+      },
       logBufferSize: {
         description:
           "Number of log entries to retain in memory. Higher values use more memory but preserve older logs.",
         label: "Log Buffer Size",
+      },
+      maxRetryCredentials: {
+        description: "Maximum credentials tried per failed request (0 = try all)",
+        label: "Max Retry Credentials",
       },
       maxRetryInterval: {
         description:
@@ -700,6 +715,7 @@ export const en = {
         label: "Routing Strategy",
         roundRobin: "Round Robin (even distribution)",
         sequential: "Sequential (ordered)",
+        weightedRoundRobin: "Weighted Round Robin (respect account weights)",
       },
     },
     oauthExcluded: {
@@ -927,5 +943,3 @@ export const en = {
     updating: "Updating...",
   },
 } as const;
-
-export type Dictionary = typeof en;

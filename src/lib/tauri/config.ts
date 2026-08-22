@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import type { XaiApiKey } from "./api-keys";
 import type { CloudflareConfig } from "./cloudflare";
 import type { AmpOpenAIProvider, CopilotConfig } from "./models";
 import type { SshConfig } from "./ssh";
@@ -25,12 +26,14 @@ export interface AppConfig {
   copilot: CopilotConfig;
   debug: boolean;
   disableControlPanel?: boolean;
+  disableCooling: boolean;
   geminiThinkingInjection?: boolean;
   launchAtLogin: boolean;
   locale?: string;
   loggingToFile: boolean;
   logsMaxTotalSizeMb: number;
   managementKey?: string;
+  maxRetryCredentials: number;
   port: number;
   proxyApiKey?: string;
   proxyPassword?: string;
@@ -46,6 +49,7 @@ export interface AppConfig {
   usageStatsEnabled: boolean;
   useSystemProxy?: boolean;
   wsAuth?: boolean;
+  xaiApiKeys?: XaiApiKey[];
 }
 
 export async function getConfig(): Promise<AppConfig> {

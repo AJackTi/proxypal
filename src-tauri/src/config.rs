@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::types::{
     amp::generate_uuid, cloudflare::CloudflareConfig, AmpModelMapping, AmpOpenAIProvider,
-    ClaudeApiKey, CodexApiKey, CopilotConfig, GeminiApiKey, SshConfig, VertexApiKey,
+    ClaudeApiKey, CodexApiKey, CopilotConfig, GeminiApiKey, SshConfig, VertexApiKey, XaiApiKey,
 };
 
 /// App configuration persisted to config.json
@@ -62,6 +62,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub codex_api_keys: Vec<CodexApiKey>,
     #[serde(default)]
+    pub xai_api_keys: Vec<XaiApiKey>,
+    #[serde(default)]
     pub vertex_api_keys: Vec<VertexApiKey>,
     #[serde(default)]
     pub thinking_budget_mode: String,
@@ -75,6 +77,10 @@ pub struct AppConfig {
     pub close_to_tray: bool,
     #[serde(default)]
     pub max_retry_interval: i32,
+    #[serde(default)]
+    pub max_retry_credentials: u32,
+    #[serde(default)]
+    pub disable_cooling: bool,
     #[serde(default = "default_proxy_api_key")]
     pub proxy_api_key: String,
     #[serde(default = "default_management_key")]
@@ -173,6 +179,7 @@ impl Default for AppConfig {
             claude_api_keys: Vec::new(),
             gemini_api_keys: Vec::new(),
             codex_api_keys: Vec::new(),
+            xai_api_keys: Vec::new(),
             vertex_api_keys: Vec::new(),
             thinking_budget_mode: "medium".to_string(),
             thinking_budget_custom: 16000,
@@ -180,6 +187,8 @@ impl Default for AppConfig {
             reasoning_effort_level: "medium".to_string(),
             close_to_tray: true,
             max_retry_interval: 0,
+            max_retry_credentials: 0,
+            disable_cooling: false,
             proxy_api_key: "proxypal-local".to_string(),
             management_key: new_management_key(),
             commercial_mode: false,

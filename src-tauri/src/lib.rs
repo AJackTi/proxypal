@@ -56,10 +56,25 @@ pub(crate) const GPT5_BASE_MODELS: &[&str] = &[
     "gpt-5.4-nano",
     "gpt-5.5",
     "gpt-5.5-fast",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
 ];
 
-// GPT-5 reasoning level suffixes
+// GPT-5 reasoning level suffixes supported by all configured GPT-5 aliases.
 pub(crate) const GPT5_REASONING_SUFFIXES: &[&str] = &["minimal", "low", "medium", "high", "xhigh"];
+
+// CLIProxyAPI exposes max and ultra reasoning only for GPT-5.6 variants.
+pub(crate) const GPT56_REASONING_SUFFIXES: &[&str] =
+    &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+pub(crate) fn gpt5_reasoning_suffixes(model: &str) -> &'static [&'static str] {
+    if model.starts_with("gpt-5.6-") {
+        GPT56_REASONING_SUFFIXES
+    } else {
+        GPT5_REASONING_SUFFIXES
+    }
+}
 
 // Load auth status from file
 pub(crate) fn load_auth_status() -> AuthStatus {
@@ -417,6 +432,7 @@ pub fn run() {
             commands::usage::export_usage_stats,
             commands::usage::import_usage_stats,
             commands::models::get_available_models,
+            commands::models::get_model_definitions,
             commands::models::test_openai_provider,
             commands::models::test_provider_connection,
             commands::models::fetch_openai_compatible_models,
@@ -433,6 +449,10 @@ pub fn run() {
             commands::api_keys::set_codex_api_keys,
             commands::api_keys::add_codex_api_key,
             commands::api_keys::delete_codex_api_key,
+            commands::api_keys::get_xai_api_keys,
+            commands::api_keys::set_xai_api_keys,
+            commands::api_keys::add_xai_api_key,
+            commands::api_keys::delete_xai_api_key,
             commands::api_keys::get_vertex_api_keys,
             commands::api_keys::set_vertex_api_keys,
             commands::api_keys::add_vertex_api_key,

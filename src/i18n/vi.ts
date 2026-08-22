@@ -118,6 +118,7 @@ export const vi = {
       addOpenAiCompatibleProvider: "Thêm nhà cung cấp tương thích OpenAI",
       addProvider: "Thêm nhà cung cấp",
       addVertexApiKey: "Thêm API Key Vertex",
+      addXaiApiKey: "Thêm xAI API Key",
       bulkAdd: "Thêm hàng loạt",
       deleteProvider: "Xóa nhà cung cấp",
       editProvider: "Sửa nhà cung cấp",
@@ -146,6 +147,7 @@ export const vi = {
       prefixOptional: "Tiền tố (tùy chọn)",
       projectIdOptional: "Project ID (tùy chọn)",
       providerNameRequired: "Tên nhà cung cấp *",
+      requestRetryOptional: "Số lần thử lại (tùy chọn, 0 = không thử lại)",
     },
     location: "Vị trí",
     noApiKeysConfiguredYet: "Chưa cấu hình API key nào",
@@ -168,10 +170,14 @@ export const vi = {
       providerBaseUrl: "https://openrouter.ai/api/v1",
       providerName: "OpenRouter",
       providerPrefix: "vd: openrouter-prod",
+      requestRetry: "e.g. 3 (để trống để dùng cài đặt chung)",
       vertexApiKey: "Dán API key Vertex của bạn...",
       vertexBaseUrl: "https://vertexai.googleapis.com",
       vertexLocation: "us-central1",
       vertexProjectId: "your-gcp-project-id",
+      xaiApiKey: "xai-...",
+      xaiBaseUrl: "https://api.x.ai/v1",
+      xaiPrefix: "vd: xai-prod",
     },
     project: "Dự án",
     proxyNotRunning: "Proxy chưa chạy",
@@ -185,6 +191,7 @@ export const vi = {
       apiKeyDeleted: "Đã xóa API key {{provider}}",
       apiKeyRequired: "API key là bắt buộc",
       atLeastOneApiKeyRequired: "Cần ít nhất một API key",
+      baseUrlRequired: "Base URL là bắt buộc",
       connectionFailed: "Kết nối thất bại",
       connectionSuccessful: "Kết nối thành công",
       failedToAddKey: "Thêm key thất bại",
@@ -676,10 +683,18 @@ export const vi = {
       },
     },
     network: {
+      disableCooling: {
+        description: "Tắt lịch trình giảm nhiệt xác thực/mô hình sau trạng thái lỗi",
+        label: "Tắt giảm nhiệt",
+      },
       logBufferSize: {
         description:
           "Số mục nhật ký giữ trong bộ nhớ. Giá trị cao hơn sử dụng nhiều bộ nhớ hơn nhưng giữ được nhật ký cũ hơn.",
         label: "Kích thước bộ đệm nhật ký",
+      },
+      maxRetryCredentials: {
+        description: "Số khóa tối đa được thử cho mỗi yêu cầu thất bại (0 = thử tất cả)",
+        label: "Số khóa thử lại tối đa",
       },
       maxRetryInterval: {
         description:
@@ -696,6 +711,7 @@ export const vi = {
         label: "Chiến lược định tuyến",
         roundRobin: "Xoay vòng (phân bổ đều)",
         sequential: "Tuần tự (theo thứ tự)",
+        weightedRoundRobin: "Xoay vòng theo trọng số (phân bổ theo trọng số tài khoản)",
       },
     },
     oauthExcluded: {
