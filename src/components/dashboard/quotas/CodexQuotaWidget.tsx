@@ -2,9 +2,15 @@ import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { useI18n } from "../../../i18n";
 import { getCachedOrFetch } from "../../../lib/quotaCache";
 import { type CodexQuotaResult, fetchCodexQuota } from "../../../lib/tauri";
-import { filterCodexQuotaAccounts, getCodexRateLimits, isCodexQuotaExhausted } from "./codexQuota";
+import {
+  filterCodexQuotaAccounts,
+  getCodexBankResetAt,
+  getCodexRateLimits,
+  isCodexQuotaExhausted,
+} from "./codexQuota";
 
 const HIDDEN_ACCOUNTS_STORAGE_KEY = "proxypal-codex-hidden-accounts";
+const BANKED_RESETS_STORAGE_KEY = "proxypal-codex-banked-resets";
 
 interface CodexQuotaWidgetProps {
   authStatus: { openai: number };
@@ -50,10 +56,17 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
   const [error, setError] = createSignal<string | null>(null);
   const [expanded, setExpanded] = createSignal(false);
   const [hiddenAccounts, setHiddenAccounts] = createSignal<Set<string>>(new Set());
+  const [bankedResetAccounts, setBankedResetAccounts] = createSignal<Record<string, number>>({});
   const [showHiddenAccounts, setShowHiddenAccounts] = createSignal(false);
 
+  const isAccountBanked = (account: CodexQuotaResult) => {
+    const resetAt = bankedResetAccounts()[account.accountKey];
+    return typeof resetAt === "number" && resetAt * 1000 > Date.now();
+  };
   const isAccountHidden = (account: CodexQuotaResult) =>
-    hiddenAccounts().has(account.accountKey) || isCodexQuotaExhausted(account);
+    hiddenAccounts().has(account.accountKey) ||
+    isAccountBanked(account) ||
+    isCodexQuotaExhausted(account);
   const hiddenAccountCount = createMemo(
     () => quotaData().filter((account) => isAccountHidden(account)).length,
   );
@@ -69,7 +82,9 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     setError(null);
     try {
       const results = await getCachedOrFetch("codex", fetchCodexQuota, forceRefresh);
-      setQuotaData(filterCodexQuotaAccounts(results));
+      const nextData = filterCodexQuotaAccounts(results);
+      setQuotaData(nextData);
+      pruneBankedResetAccounts(nextData);
     } catch (error) {
       setError(String(error));
     } finally {
@@ -90,6 +105,23 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
     } catch {
       localStorage.removeItem(HIDDEN_ACCOUNTS_STORAGE_KEY);
     }
+    try {
+      const savedBankedResets = JSON.parse(
+        localStorage.getItem(BANKED_RESETS_STORAGE_KEY) ?? "{}",
+      );
+      if (savedBankedResets && typeof savedBankedResets === "object") {
+        const nowSeconds = Date.now() / 1000;
+        setBankedResetAccounts(
+          Object.fromEntries(
+            Object.entries(savedBankedResets).filter(
+              ([, resetAt]) => typeof resetAt === "number" && resetAt > nowSeconds,
+            ) as [string, number][],
+          ),
+        );
+      }
+    } catch {
+      localStorage.removeItem(BANKED_RESETS_STORAGE_KEY);
+    }
 
     if (props.authStatus.openai > 0) {
       loadQuota();
@@ -105,6 +137,45 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
         next.add(accountKey);
       }
       localStorage.setItem(HIDDEN_ACCOUNTS_STORAGE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const persistBankedResetAccounts = (next: Record<string, number>) => {
+    if (Object.keys(next).length === 0) {
+      localStorage.removeItem(BANKED_RESETS_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(BANKED_RESETS_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const pruneBankedResetAccounts = (accounts: CodexQuotaResult[]) => {
+    setBankedResetAccounts((current) => {
+      const validAccountKeys = new Set(accounts.map((account) => account.accountKey));
+      const nowSeconds = Date.now() / 1000;
+      const next = Object.fromEntries(
+        Object.entries(current).filter(
+          ([accountKey, resetAt]) => validAccountKeys.has(accountKey) && resetAt > nowSeconds,
+        ),
+      );
+      persistBankedResetAccounts(next);
+      return next;
+    });
+  };
+
+  const toggleBankReset = (account: CodexQuotaResult) => {
+    setBankedResetAccounts((current) => {
+      const next = { ...current };
+      if (isAccountBanked(account)) {
+        delete next[account.accountKey];
+      } else {
+        const resetAt = getCodexBankResetAt(account);
+        if (!resetAt) {
+          return current;
+        }
+        next[account.accountKey] = resetAt;
+      }
+      persistBankedResetAccounts(next);
       return next;
     });
   };
@@ -285,7 +356,9 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                     </span>
                     <Show when={isAccountHidden(account)}>
                       <span class="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium uppercase text-gray-500 dark:bg-gray-600 dark:text-gray-300">
-                        {isCodexQuotaExhausted(account)
+                        {isAccountBanked(account)
+                          ? t("dashboard.quota.bankedReset")
+                          : isCodexQuotaExhausted(account)
                           ? t("dashboard.quota.percentUsed", { count: "100" })
                           : t("dashboard.quota.hidden")}
                       </span>
@@ -296,6 +369,26 @@ export function CodexQuotaWidget(props: CodexQuotaWidgetProps) {
                       <span class="text-[10px] font-medium text-red-500">
                         {t("dashboard.quota.apiError")}
                       </span>
+                    </Show>
+                    <Show when={getCodexBankResetAt(account)}>
+                      {(resetAt) => (
+                        <button
+                          aria-pressed={isAccountBanked(account)}
+                          class="rounded-md border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-500 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                          onClick={() => toggleBankReset(account)}
+                          title={
+                            isAccountBanked(account)
+                              ? t("dashboard.quota.clearBankReset")
+                              : t("dashboard.quota.bankResetUntil", {
+                                  time: formatResetTime(resetAt()),
+                                })
+                          }
+                        >
+                          {isAccountBanked(account)
+                            ? t("dashboard.quota.bankedReset")
+                            : t("dashboard.quota.bankReset")}
+                        </button>
+                      )}
                     </Show>
                     <button
                       aria-label={

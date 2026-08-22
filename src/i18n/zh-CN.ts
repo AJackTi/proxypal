@@ -465,8 +465,12 @@ export const zhCN = {
     },
     quota: {
       apiError: "API 错误",
+      bankReset: "Bank reset",
+      bankResetUntil: "将此账号 bank 到 {{time}} 后重置",
+      bankedReset: "已 bank reset",
       chat: "聊天",
       claudeTitle: "Claude 配额",
+      clearBankReset: "清除 bank reset",
       codexTitle: "OpenAI (Codex) 配额",
       creditsBalance: "积分余额",
       extraUsage: "额外用量",

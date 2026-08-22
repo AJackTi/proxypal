@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   filterCodexQuotaAccounts,
+  getCodexBankResetAt,
   getCodexRateLimits,
   isCodexQuotaExhausted,
   isCodexQuotaInvalidated,
@@ -49,6 +50,26 @@ describe("getCodexRateLimits", () => {
         usedPercent: 25,
       },
     ]);
+  });
+});
+
+describe("getCodexBankResetAt", () => {
+  it("uses the next future reset window for bank reset", () => {
+    expect(
+      getCodexBankResetAt(
+        {
+          ...baseAccount,
+          primaryResetAt: 1_752_800_000,
+          secondaryResetAt: 1_753_000_000,
+          secondaryUsedPercent: 25,
+        },
+        1_752_700_000,
+      ),
+    ).toBe(1_752_800_000);
+  });
+
+  it("ignores reset windows that have already passed", () => {
+    expect(getCodexBankResetAt(baseAccount, 1_752_900_000)).toBeUndefined();
   });
 });
 

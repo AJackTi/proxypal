@@ -473,8 +473,12 @@ export const en = {
     },
     quota: {
       apiError: "API Error",
+      bankReset: "Bank reset",
+      bankResetUntil: "Bank this account until reset in {{time}}",
+      bankedReset: "Banked reset",
       chat: "Chat",
       claudeTitle: "Claude Quota",
+      clearBankReset: "Clear bank reset",
       codexTitle: "OpenAI (Codex) Quota",
       creditsBalance: "Credits Balance",
       extraUsage: "Extra Usage",

@@ -469,8 +469,12 @@ export const vi = {
     },
     quota: {
       apiError: "Lỗi API",
+      bankReset: "Bank reset",
+      bankResetUntil: "Bank tài khoản này đến khi reset sau {{time}}",
+      bankedReset: "Đã bank reset",
       chat: "Chat",
       claudeTitle: "Hạn mức Claude",
+      clearBankReset: "Xóa bank reset",
       codexTitle: "Hạn mức OpenAI (Codex)",
       creditsBalance: "Số dư tín dụng",
       extraUsage: "Sử dụng thêm",
