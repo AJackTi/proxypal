@@ -20,9 +20,104 @@ fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
         candidates.push(auth_dir.join(format!("{basename}.json")));
     }
     if !basename.ends_with(".json.disabled") {
-        candidates.push(auth_dir.join(format!("{basename}.json.disabled")));
+        let disabled_name = if basename.ends_with(".json") {
+            format!("{basename}.disabled")
+        } else {
+            format!("{basename}.json.disabled")
+        };
+        candidates.push(auth_dir.join(disabled_name));
     }
     Some(candidates)
+}
+
+struct NormalizedAuthFile {
+    content: Vec<u8>,
+    filename: String,
+}
+
+fn safe_filename_fragment(value: &str) -> String {
+    let fragment: String = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '@' | '+' | '-' | '_')
+            {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+
+    if fragment.is_empty() {
+        "account".to_string()
+    } else {
+        fragment
+    }
+}
+
+fn normalize_auth_file(
+    content: &[u8],
+    filename: &str,
+    _provider: &str,
+) -> Result<NormalizedAuthFile, String> {
+    let value: serde_json::Value = serde_json::from_slice(content)
+        .map_err(|error| format!("Invalid JSON auth file: {error}"))?;
+
+    let Some(tokens) = value.get("tokens").and_then(serde_json::Value::as_object) else {
+        return Ok(NormalizedAuthFile {
+            content: content.to_vec(),
+            filename: filename.to_string(),
+        });
+    };
+
+    let token = |name: &str| {
+        tokens
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("ChatGPT auth file is missing tokens.{name}"))
+    };
+
+    let access_token = token("access_token")?;
+    let refresh_token = token("refresh_token")?;
+    let id_token = token("id_token")?;
+    let account_id = token("account_id")?;
+    let metadata = value.get("_meta").and_then(serde_json::Value::as_object);
+    let email = metadata
+        .and_then(|meta| meta.get("email"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(account_id);
+    let plan_type = metadata
+        .and_then(|meta| meta.get("plan_type"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("plus");
+
+    let mut normalized = serde_json::Map::new();
+    normalized.insert("type".to_string(), serde_json::json!("codex"));
+    normalized.insert("access_token".to_string(), serde_json::json!(access_token));
+    normalized.insert(
+        "refresh_token".to_string(),
+        serde_json::json!(refresh_token),
+    );
+    normalized.insert("id_token".to_string(), serde_json::json!(id_token));
+    normalized.insert("account_id".to_string(), serde_json::json!(account_id));
+    normalized.insert("email".to_string(), serde_json::json!(email));
+    normalized.insert("plan_type".to_string(), serde_json::json!(plan_type));
+    normalized.insert("disabled".to_string(), serde_json::json!(false));
+    if let Some(last_refresh) = value.get("last_refresh").filter(|value| !value.is_null()) {
+        normalized.insert("last_refresh".to_string(), last_refresh.clone());
+    }
+
+    let filename = format!(
+        "codex-{}-{}.json",
+        safe_filename_fragment(email),
+        safe_filename_fragment(plan_type)
+    );
+
+    serde_json::to_vec_pretty(&serde_json::Value::Object(normalized))
+        .map(|content| NormalizedAuthFile { content, filename })
+        .map_err(|error| format!("Failed to serialize normalized auth file: {error}"))
 }
 
 fn auth_file_delete_url(port: u16, filename: &str) -> Result<reqwest::Url, String> {
@@ -218,9 +313,6 @@ pub async fn upload_auth_file(
     let port = state.config.lock().unwrap().port;
     let url = get_management_url(port, "auth-files");
 
-    // Read file content
-    let content = std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
     // Get filename from path
     let filename = std::path::Path::new(&file_path)
         .file_name()
@@ -228,17 +320,30 @@ pub async fn upload_auth_file(
         .unwrap_or("auth.json")
         .to_string();
 
+    // Read and normalize outside the async runtime thread.
+    let content_path = file_path.clone();
+    let content = tokio::task::spawn_blocking(move || std::fs::read(content_path))
+        .await
+        .map_err(|error| format!("Failed to read file task: {error}"))?
+        .map_err(|error| format!("Failed to read file: {error}"))?;
+    let normalized = normalize_auth_file(&content, &filename, &provider)?;
+    let upload_provider = if normalized.filename.starts_with("codex-") {
+        "openai".to_string()
+    } else {
+        provider
+    };
+
     let client = build_management_client();
 
     // Create multipart form
-    let part = reqwest::multipart::Part::bytes(content)
-        .file_name(filename.clone())
+    let part = reqwest::multipart::Part::bytes(normalized.content)
+        .file_name(normalized.filename.clone())
         .mime_str("application/json")
         .map_err(|e| e.to_string())?;
 
     let form = reqwest::multipart::Form::new()
-        .text("provider", provider)
-        .text("filename", filename)
+        .text("provider", upload_provider)
+        .text("filename", normalized.filename)
         .part("file", part);
 
     let response = client
@@ -533,7 +638,83 @@ pub async fn batch_delete_auth_files(
 
 #[cfg(test)]
 mod tests {
-    use super::local_auth_file_candidates;
+    use super::{local_auth_file_candidates, normalize_auth_file};
+
+    #[test]
+    fn normalizes_chatgpt_cli_auth_to_cli_proxy_api_shape() {
+        let input = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "last_refresh": "2026-08-28T00:00:00Z",
+            "_meta": {"email": "alice+test@example.com", "plan_type": "plus"},
+            "tokens": {
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "id_token": "id",
+                "account_id": "account"
+            }
+        });
+
+        let normalized = normalize_auth_file(
+            serde_json::to_vec(&input).unwrap().as_slice(),
+            "chatgpt-plus-1-auth.json",
+            "claude",
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_slice(&normalized.content).unwrap();
+
+        assert_eq!(
+            normalized.filename,
+            "codex-alice+test@example.com-plus.json"
+        );
+        assert_eq!(output["type"], "codex");
+        assert_eq!(output["access_token"], "access");
+        assert_eq!(output["refresh_token"], "refresh");
+        assert_eq!(output["id_token"], "id");
+        assert_eq!(output["account_id"], "account");
+        assert_eq!(output["email"], "alice+test@example.com");
+        assert_eq!(output["plan_type"], "plus");
+        assert!(output.get("tokens").is_none());
+    }
+
+    #[test]
+    fn leaves_existing_cli_proxy_api_auth_shape_unchanged() {
+        let input = serde_json::json!({
+            "type": "codex",
+            "access_token": "access",
+            "refresh_token": "refresh",
+            "id_token": "id",
+            "account_id": "account",
+            "email": "alice@example.com"
+        });
+
+        let normalized = normalize_auth_file(
+            serde_json::to_vec(&input).unwrap().as_slice(),
+            "codex-alice@example.com-plus.json",
+            "openai",
+        )
+        .unwrap();
+        let output: serde_json::Value = serde_json::from_slice(&normalized.content).unwrap();
+
+        assert_eq!(normalized.filename, "codex-alice@example.com-plus.json");
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn rejects_chatgpt_cli_auth_without_required_tokens() {
+        let input = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "_meta": {"email": "alice@example.com"},
+            "tokens": {"refresh_token": "refresh"}
+        });
+
+        let result = normalize_auth_file(
+            serde_json::to_vec(&input).unwrap().as_slice(),
+            "chatgpt-plus-1-auth.json",
+            "claude",
+        );
+
+        assert!(result.is_err());
+    }
 
     #[test]
     fn local_candidates_reject_path_traversal() {

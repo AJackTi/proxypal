@@ -4,6 +4,7 @@ import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/ui";
 import { useI18n } from "../i18n";
 import { isAuthFileAutoCollapsed, selectFilesForDownload } from "../lib/authFiles";
+import { detectProviderFromFilename } from "../lib/authImport";
 import { selectLatestGptModel } from "../lib/gptModel";
 import {
   type AuthFile,
@@ -112,38 +113,6 @@ export function AuthFilesPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Detect provider from filename using common prefixes
-  const detectProviderFromFilename = (filename: string): string => {
-    if (filename.includes("gemini")) {
-      return "gemini";
-    }
-    if (filename.includes("codex")) {
-      return "codex";
-    }
-    if (filename.includes("qwen")) {
-      return "qwen";
-    }
-    if (filename.includes("iflow")) {
-      return "iflow";
-    }
-    if (filename.includes("vertex")) {
-      return "vertex";
-    }
-    if (filename.includes("kiro")) {
-      return "kiro";
-    }
-    if (filename.includes("antigravity")) {
-      return "antigravity";
-    }
-    if (filename.includes("kimi")) {
-      return "kimi";
-    }
-    if (filename.includes("deepseek")) {
-      return "deepseek";
-    }
-    return "claude";
   };
 
   const [uploadingFiles, setUploadingFiles] = createSignal<string[]>([]);
