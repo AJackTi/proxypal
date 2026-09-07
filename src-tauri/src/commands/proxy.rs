@@ -21,6 +21,44 @@ use url::Url;
 
 const DEFAULT_PROXY_CHECK_URL: &str = "https://example.com";
 
+// CLIProxyAPI stores retry counts as signed 32-bit integers. This value is a
+// practical "keep retrying" sentinel for transient xAI 429 responses; quota
+// exhaustion is still stopped by the sidecar's explicit 24-hour retry hint.
+const XAI_CONTINUOUS_RETRY_COUNT: i32 = i32::MAX;
+const XAI_RETRY_INTERVAL_SECONDS: i32 = 60;
+
+fn effective_max_retry_interval(config: &AppConfig) -> i32 {
+    // CLIProxyAPI treats max-retry-interval=0 as "do not wait". xAI applies a
+    // short cooldown to generic 429s, so provide a bounded wait by default;
+    // quota-exhausted responses advertise 24h and therefore still stop.
+    if (config.quota_switch_project || !config.xai_api_keys.is_empty())
+        && config.max_retry_interval <= 0
+    {
+        XAI_RETRY_INTERVAL_SECONDS
+    } else {
+        config.max_retry_interval
+    }
+}
+
+fn effective_request_retry(config: &AppConfig) -> i32 {
+    // Project failover must not stop after a small, stale retry value. The
+    // sidecar still stops on non-retryable errors and exhausted credentials.
+    if config.quota_switch_project {
+        XAI_CONTINUOUS_RETRY_COUNT
+    } else {
+        i32::from(config.request_retry)
+    }
+}
+
+fn effective_max_retry_credentials(config: &AppConfig) -> u32 {
+    // A cap of 2 would make a third project unreachable during quota failover.
+    if config.quota_switch_project {
+        0
+    } else {
+        config.max_retry_credentials
+    }
+}
+
 fn env_proxy_for_url(target_url: &str) -> Option<String> {
     let parsed = Url::parse(target_url).ok()?;
     let proxy = env_proxy::for_url(&parsed);
@@ -123,9 +161,9 @@ ws-auth: {}
         config.usage_stats_enabled,
         config.logging_to_file,
         config.logs_max_total_size_mb,
-        config.request_retry,
-        config.max_retry_interval,
-        config.max_retry_credentials,
+        effective_request_retry(config),
+        effective_max_retry_interval(config),
+        effective_max_retry_credentials(config),
         config.disable_cooling,
         proxy_url_line,
         config.quota_switch_project,
@@ -371,8 +409,16 @@ fn build_xai_api_key_section(config: &AppConfig) -> String {
     let mut section = String::from("# xAI API keys\nxai-api-key:\n");
     for key in &config.xai_api_keys {
         section.push_str(&format!("  - api-key: \"{}\"\n", key.api_key));
-        if let Some(retry) = key.request_retry {
-            section.push_str(&format!("    request-retry: {}\n", retry));
+        // Generic xAI 429s must keep retrying until recovery. Preserve only an
+        // explicit zero as an opt-out; positive/omitted values use the maximum
+        // sidecar retry budget so a stale value such as 2 cannot stop recovery.
+        if key.request_retry == Some(0) {
+            section.push_str("    request-retry: 0\n");
+        } else {
+            section.push_str(&format!(
+                "    request-retry: {}\n",
+                XAI_CONTINUOUS_RETRY_COUNT
+            ));
         }
         section.push_str(&format!("    base-url: \"{}\"\n", key.base_url));
         if let Some(ref proxy_url) = key.proxy_url {
@@ -710,6 +756,11 @@ pub async fn start_proxy(
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".cli-proxy-api");
     std::fs::create_dir_all(&auth_dir).ok(); // Best-effort: create if missing
+    if let Err(error) =
+        crate::commands::auth_files::prioritize_chatgpt_plus_auth_files(auth_dir.clone()).await
+    {
+        eprintln!("[ProxyPal] Failed to prioritize ChatGPT Plus accounts: {error}");
+    }
 
     let proxy_config_path = config_dir.join("proxy-config.yaml");
 
@@ -862,7 +913,7 @@ pub async fn start_proxy(
                 port
             ))
             .header("X-Management-Key", &get_management_key())
-            .json(&serde_json::json!({"value": config.max_retry_interval}))
+            .json(&serde_json::json!({"value": effective_max_retry_interval(&config)}))
             .send()
             .await;
     }
@@ -1066,8 +1117,28 @@ mod tests {
 
         assert!(yaml.contains("# xAI API keys\nxai-api-key:"));
         assert!(yaml.contains("api-key: \"xai-test-key\""));
+        assert!(yaml.contains(&format!("request-retry: {}", XAI_CONTINUOUS_RETRY_COUNT)));
         assert!(yaml.contains("base-url: \"https://api.x.ai/v1\""));
         assert!(yaml.contains("prefix: \"xai\""));
+        assert!(yaml.contains("max-retry-interval: 60"));
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_respects_explicit_xai_retry_override() {
+        let mut config = crate::config::AppConfig::default();
+        config.xai_api_keys.push(crate::types::XaiApiKey {
+            api_key: "xai-test-key".to_string(),
+            base_url: "https://api.x.ai/v1".to_string(),
+            request_retry: Some(0),
+            ..Default::default()
+        });
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-xai-override");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        let xai = yaml.split_once("xai-api-key:").expect("xai section").1;
+        assert!(xai.contains("request-retry: 0"));
+        assert!(!xai.contains(&format!("request-retry: {}", XAI_CONTINUOUS_RETRY_COUNT)));
     }
 
     #[test]
@@ -1163,7 +1234,10 @@ mod tests {
             .split_once("vertex-api-key:")
             .expect("vertex section")
             .0;
-        assert!(xai.contains("request-retry: 4"), "xai:\n{xai}");
+        assert!(
+            xai.contains(&format!("request-retry: {}", XAI_CONTINUOUS_RETRY_COUNT)),
+            "xai should ignore finite retry overrides:\n{xai}"
+        );
 
         let vertex = yaml
             .split_once("vertex-api-key:")
@@ -1198,5 +1272,21 @@ mod tests {
 
         assert!(yaml.contains("max-retry-credentials: 3"));
         assert!(yaml.contains("disable-cooling: true"));
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_allows_all_projects_during_quota_failover() {
+        let mut config = crate::config::AppConfig::default();
+        config.quota_switch_project = true;
+        config.request_retry = 2;
+        config.max_retry_credentials = 2;
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-project-failover");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        assert!(yaml.contains(&format!("request-retry: {}", XAI_CONTINUOUS_RETRY_COUNT)));
+        assert!(yaml.contains("max-retry-credentials: 0"));
+        assert!(yaml.contains("max-retry-interval: 60"));
+        assert!(yaml.contains("switch-project: true"));
     }
 }

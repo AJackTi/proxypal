@@ -375,7 +375,14 @@ pub async fn get_xai_api_keys(state: State<'_, AppState>) -> Result<Vec<XaiApiKe
     }
 
     let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    convert_api_key_response(json, "xai-api-key")
+    let mut keys: Vec<XaiApiKey> = convert_api_key_response(json, "xai-api-key")?;
+    // Do not expose the internal continuous-retry sentinel in the UI.
+    for key in &mut keys {
+        if key.request_retry == Some(i32::MAX) {
+            key.request_retry = None;
+        }
+    }
+    Ok(keys)
 }
 
 #[tauri::command]
@@ -393,7 +400,19 @@ pub async fn set_xai_api_keys(
     let port = state.config.lock().unwrap().port;
     let url = crate::get_management_url(port, "xai-api-key");
     let client = crate::build_management_client();
-    let body = convert_to_management_format(&keys)?;
+    let management_keys: Vec<XaiApiKey> = keys
+        .iter()
+        .cloned()
+        .map(|mut key| {
+            // Generic xAI 429s must keep retrying until recovery. Only an
+            // explicit zero opts out; finite values cannot terminate recovery.
+            if key.request_retry != Some(0) {
+                key.request_retry = Some(i32::MAX);
+            }
+            key
+        })
+        .collect();
+    let body = convert_to_management_format(&management_keys)?;
 
     let response = client
         .put(&url)

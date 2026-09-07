@@ -263,7 +263,7 @@ export const en = {
     noAuthFilesDescription:
       "OAuth credentials will appear here after connecting providers, or upload credential files manually.",
     priority: {
-      tooltip: "Routing priority — lower number = higher priority",
+      tooltip: "Routing priority - higher number is selected first",
     },
     proxyNotRunning: "Proxy Not Running",
     startProxyDescription: "Start the proxy server to manage auth files via the Management API.",
@@ -705,11 +705,12 @@ export const en = {
       },
       maxRetryInterval: {
         description:
-          "Maximum wait time between retries in seconds (0 = no limit). Updates live without restart.",
+          "Maximum wait time between retries in seconds (0 = no wait). xAI uses 60s by default so transient 429s can recover.",
         label: "Max Retry Interval (seconds)",
       },
       requestRetry: {
-        description: "Number of retries on 403, 408, 500, 502, 503, 504 errors (0-10)",
+        description:
+          "Retries on 403, 408, 429, 500, 502, 503, 504 (0-10). Generic xAI 429 rate limits keep retrying until recovery; quota exhaustion stops.",
         label: "Request Retry Count",
       },
       routingStrategy: {

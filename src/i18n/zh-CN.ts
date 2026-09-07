@@ -260,7 +260,7 @@ export const zhCN = {
     noAuthFiles: "暂无认证文件",
     noAuthFilesDescription: "连接提供商后 OAuth 凭据会显示在这里，或可手动上传凭据文件。",
     priority: {
-      tooltip: "路由优先级 — 数字越小优先级越高",
+      tooltip: "路由优先级 - 数字越大越优先",
     },
     proxyNotRunning: "代理未运行",
     startProxyDescription: "启动代理服务器后即可通过管理 API 管理认证文件。",
@@ -694,11 +694,12 @@ export const zhCN = {
         label: "最大重试凭据数",
       },
       maxRetryInterval: {
-        description: "两次重试之间的最大等待时间（0 = 不限制）。实时生效，无需重启。",
+        description: "两次重试之间的最大等待时间（秒）（0 = 不等待）。xAI 默认使用 60 秒，以便临时 429 能够恢复。",
         label: "最大重试间隔（秒）",
       },
       requestRetry: {
-        description: "遇到 403、408、500、502、503、504 错误时的重试次数（0-10）",
+        description:
+          "遇到 403、408、429、500、502、503、504 错误时的重试次数（0-10）。xAI 临时 429 会持续重试直到恢复；配额耗尽时停止。",
         label: "请求重试次数",
       },
       routingStrategy: {

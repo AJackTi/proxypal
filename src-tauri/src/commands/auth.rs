@@ -400,6 +400,16 @@ pub async fn poll_oauth_status(
 
     // Check if auth is complete - CLIProxyAPI returns { "status": "ok" } when done
     let status = body["status"].as_str().unwrap_or("wait");
+    if status == "ok" {
+        let auth_dir = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".cli-proxy-api");
+        if let Err(error) =
+            crate::commands::auth_files::prioritize_chatgpt_plus_auth_files(auth_dir).await
+        {
+            eprintln!("[ProxyPal] Failed to prioritize ChatGPT Plus account: {error}");
+        }
+    }
     Ok(status == "ok")
 }
 

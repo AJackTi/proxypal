@@ -7,6 +7,8 @@ use crate::{build_management_client, get_management_key, get_management_url};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
+const CHATGPT_PLUS_PRIORITY: i32 = 100;
+
 fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
     let requested = Path::new(filename);
     let basename = requested.file_name()?.to_str()?;
@@ -33,6 +35,72 @@ fn local_auth_file_candidates(filename: &str) -> Option<Vec<PathBuf>> {
 struct NormalizedAuthFile {
     content: Vec<u8>,
     filename: String,
+}
+
+fn apply_chatgpt_plus_priority(value: &mut serde_json::Value, filename: &str) -> bool {
+    let Some(object) = value.as_object_mut() else {
+        return false;
+    };
+    if object.contains_key("priority") {
+        return false;
+    }
+
+    let plan_type = object
+        .get("plan_type")
+        .or_else(|| object.get("account_type"))
+        .and_then(serde_json::Value::as_str);
+    let is_plus = plan_type.is_some_and(|plan| plan.eq_ignore_ascii_case("plus"))
+        || filename.to_ascii_lowercase().ends_with("-plus.json");
+    if !is_plus {
+        return false;
+    }
+
+    object.insert(
+        "priority".to_string(),
+        serde_json::json!(CHATGPT_PLUS_PRIORITY),
+    );
+    true
+}
+
+pub(crate) async fn prioritize_chatgpt_plus_auth_files(auth_dir: PathBuf) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let entries = match std::fs::read_dir(&auth_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(format!("Failed to read auth directory: {error}")),
+        };
+
+        let mut updated = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !filename.to_ascii_lowercase().starts_with("codex-")
+                || !filename.to_ascii_lowercase().ends_with(".json")
+            {
+                continue;
+            }
+
+            let Ok(content) = std::fs::read(&path) else {
+                continue;
+            };
+            let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&content) else {
+                continue;
+            };
+            if !apply_chatgpt_plus_priority(&mut value, filename) {
+                continue;
+            }
+            let serialized = serde_json::to_vec_pretty(&value)
+                .map_err(|error| format!("Failed to serialize {filename}: {error}"))?;
+            std::fs::write(&path, serialized)
+                .map_err(|error| format!("Failed to update {filename}: {error}"))?;
+            updated += 1;
+        }
+        Ok(updated)
+    })
+    .await
+    .map_err(|error| format!("ChatGPT Plus priority task failed: {error}"))?
 }
 
 fn safe_filename_fragment(value: &str) -> String {
@@ -64,8 +132,15 @@ fn normalize_auth_file(
         .map_err(|error| format!("Invalid JSON auth file: {error}"))?;
 
     let Some(tokens) = value.get("tokens").and_then(serde_json::Value::as_object) else {
+        let mut prioritized = value;
+        let content = if apply_chatgpt_plus_priority(&mut prioritized, filename) {
+            serde_json::to_vec_pretty(&prioritized)
+                .map_err(|error| format!("Failed to serialize normalized auth file: {error}"))?
+        } else {
+            content.to_vec()
+        };
         return Ok(NormalizedAuthFile {
-            content: content.to_vec(),
+            content,
             filename: filename.to_string(),
         });
     };
@@ -104,6 +179,12 @@ fn normalize_auth_file(
     normalized.insert("account_id".to_string(), serde_json::json!(account_id));
     normalized.insert("email".to_string(), serde_json::json!(email));
     normalized.insert("plan_type".to_string(), serde_json::json!(plan_type));
+    if plan_type.eq_ignore_ascii_case("plus") {
+        normalized.insert(
+            "priority".to_string(),
+            serde_json::json!(CHATGPT_PLUS_PRIORITY),
+        );
+    }
     normalized.insert("disabled".to_string(), serde_json::json!(false));
     if let Some(last_refresh) = value.get("last_refresh").filter(|value| !value.is_null()) {
         normalized.insert("last_refresh".to_string(), last_refresh.clone());
@@ -677,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn leaves_existing_cli_proxy_api_auth_shape_unchanged() {
+    fn prioritizes_existing_plus_auth_shape_without_overwriting_user_priority() {
         let input = serde_json::json!({
             "type": "codex",
             "access_token": "access",
@@ -696,7 +777,22 @@ mod tests {
         let output: serde_json::Value = serde_json::from_slice(&normalized.content).unwrap();
 
         assert_eq!(normalized.filename, "codex-alice@example.com-plus.json");
-        assert_eq!(output, input);
+        assert_eq!(output["priority"], 100);
+
+        let custom = serde_json::json!({
+            "type": "codex",
+            "email": "alice@example.com",
+            "priority": 7
+        });
+        let custom_normalized = normalize_auth_file(
+            serde_json::to_vec(&custom).unwrap().as_slice(),
+            "codex-alice@example.com-plus.json",
+            "openai",
+        )
+        .unwrap();
+        let custom_output: serde_json::Value =
+            serde_json::from_slice(&custom_normalized.content).unwrap();
+        assert_eq!(custom_output["priority"], 7);
     }
 
     #[test]

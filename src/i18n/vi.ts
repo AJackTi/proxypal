@@ -263,7 +263,7 @@ export const vi = {
     noAuthFilesDescription:
       "Thông tin xác thực OAuth sẽ hiển thị ở đây sau khi kết nối nhà cung cấp, hoặc bạn có thể tải lên tệp thủ công.",
     priority: {
-      tooltip: "Ưu tiên định tuyến — số càng nhỏ ưu tiên càng cao",
+      tooltip: "Ưu tiên định tuyến - số cao hơn được chọn trước",
     },
     proxyNotRunning: "Proxy chưa chạy",
     startProxyDescription: "Khởi động proxy server để quản lý tệp xác thực qua Management API.",
@@ -701,11 +701,12 @@ export const vi = {
       },
       maxRetryInterval: {
         description:
-          "Thời gian chờ tối đa giữa các lần thử lại (giây) (0 = không giới hạn). Áp dụng ngay không cần khởi động lại.",
+          "Thời gian chờ tối đa giữa các lần thử lại (giây) (0 = không chờ). xAI mặc định dùng 60 giây để 429 tạm thời có thể hồi phục.",
         label: "Khoảng thời gian thử lại tối đa (giây)",
       },
       requestRetry: {
-        description: "Số lần thử lại khi gặp lỗi 403, 408, 500, 502, 503, 504 (0-10)",
+        description:
+          "Thử lại khi gặp lỗi 403, 408, 429, 500, 502, 503, 504 (0-10). 429 tạm thời của xAI sẽ tiếp tục thử đến khi hoạt động lại; hết quota thì dừng.",
         label: "Số lần thử lại yêu cầu",
       },
       routingStrategy: {

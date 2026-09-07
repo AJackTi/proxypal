@@ -17,7 +17,7 @@ export interface AuthFile {
   /** User-defined note/description for this auth entry (v6.8.55+) */
   note?: string;
   path?: string;
-  /** Priority for routing order — lower = higher priority (v6.8.55+) */
+  /** Priority for routing order - higher values are selected first (v6.8.55+) */
   priority?: number;
   provider: string;
   runtimeOnly: boolean;

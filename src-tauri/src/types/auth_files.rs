@@ -43,7 +43,7 @@ pub struct AuthFile {
     pub success_count: Option<u64>,
     #[serde(alias = "failure_count", skip_serializing_if = "Option::is_none")]
     pub failure_count: Option<u64>,
-    /// Priority for routing order (lower = higher priority). CLIProxyAPI v6.8.55+
+    /// Priority for routing order (higher = selected first). CLIProxyAPI v6.8.55+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<i32>,
     /// User-defined note/description for this auth entry. CLIProxyAPI v6.8.55+
