@@ -3,7 +3,7 @@
 use crate::config::save_config_to_file;
 use crate::state::AppState;
 use crate::types::{ReasoningEffortSettings, ThinkingBudgetSettings};
-use crate::{build_management_client, get_management_key, get_management_url};
+use crate::{build_management_client, get_management_url};
 use tauri::State;
 
 // ============================================
@@ -178,7 +178,7 @@ pub async fn get_max_retry_interval(state: State<'_, AppState>) -> Result<i32, S
     let client = build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to get max retry interval: {}", e))?;
@@ -200,7 +200,7 @@ pub async fn set_max_retry_interval(state: State<'_, AppState>, value: i32) -> R
     let client = build_management_client();
     let response = client
         .put(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&serde_json::json!({ "value": value }))
         .send()
         .await
@@ -232,7 +232,7 @@ pub async fn get_websocket_auth(state: State<'_, AppState>) -> Result<bool, Stri
     let client = build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to get WebSocket auth: {}", e))?;
@@ -254,7 +254,7 @@ pub async fn set_websocket_auth(state: State<'_, AppState>, value: bool) -> Resu
     let client = build_management_client();
     let response = client
         .put(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&serde_json::json!({ "value": value }))
         .send()
         .await

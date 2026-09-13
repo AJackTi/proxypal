@@ -101,7 +101,7 @@ pub async fn get_oauth_url(
     let client = crate::build_management_client();
     let response = client
         .get(&endpoint)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to get OAuth URL: {}. Is the proxy running?", e))?;
@@ -168,7 +168,7 @@ pub async fn get_device_code(
     let client = crate::build_management_client();
     let response = client
         .get(&endpoint)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to get device code: {}. Is the proxy running?", e))?;
@@ -276,7 +276,7 @@ pub async fn open_oauth(
     let client = crate::build_management_client();
     let response = client
         .get(&endpoint)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to get OAuth URL: {}. Is the proxy running?", e))?;
@@ -337,7 +337,7 @@ pub async fn poll_oauth_status(
     let client = crate::build_management_client();
     let response = client
         .get(&endpoint)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to poll OAuth status: {}", e))?;

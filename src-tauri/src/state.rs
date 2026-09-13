@@ -24,6 +24,19 @@ pub struct AppState {
     pub request_counter: Arc<AtomicU64>,
 }
 
+impl AppState {
+    /// The management key the running sidecar was started with.
+    ///
+    /// Reads the same in-memory config that `build_proxy_config_yaml` writes into
+    /// `remote-management.secret-key`, so the `X-Management-Key` header and the
+    /// sidecar can never disagree. Previously this re-read `config.json` on every
+    /// call, which minted a new random key per request whenever the file was
+    /// missing or unreadable (issue #235).
+    pub(crate) fn management_key(&self) -> String {
+        self.config.lock().unwrap().management_key.clone()
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self {

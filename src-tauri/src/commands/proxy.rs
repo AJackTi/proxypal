@@ -4,7 +4,6 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::commands::usage::start_usage_queue_collector;
 use crate::config::AppConfig;
-use crate::get_management_key;
 use crate::helpers::log_watcher::start_log_watcher;
 use crate::state::AppState;
 use crate::types::ProxyStatus;
@@ -903,7 +902,7 @@ pub async fn start_proxy(
 
         match client
             .get(&health_url)
-            .header("X-Management-Key", &get_management_key())
+            .header("X-Management-Key", &state.management_key())
             .send()
             .await
         {
@@ -926,7 +925,7 @@ pub async fn start_proxy(
                 "http://127.0.0.1:{}/v0/management/usage-statistics-enabled",
                 port
             ))
-            .header("X-Management-Key", &get_management_key())
+            .header("X-Management-Key", &state.management_key())
             .json(&serde_json::json!({"value": config.usage_stats_enabled}))
             .send()
             .await;
@@ -936,7 +935,7 @@ pub async fn start_proxy(
                 "http://127.0.0.1:{}/v0/management/max-retry-interval",
                 port
             ))
-            .header("X-Management-Key", &get_management_key())
+            .header("X-Management-Key", &state.management_key())
             .json(&serde_json::json!({"value": config.max_retry_interval}))
             .send()
             .await;
@@ -958,7 +957,11 @@ pub async fn start_proxy(
 
     // Start usage-queue collector
     let usage_collector_gen = state.usage_queue_collector_gen.clone();
-    start_usage_queue_collector(usage_collector_gen, config.port);
+    start_usage_queue_collector(
+        usage_collector_gen,
+        config.port,
+        config.management_key.clone(),
+    );
 
     // Update status
     let new_status = {

@@ -87,7 +87,7 @@ pub struct AppConfig {
     pub disable_cooling: bool,
     #[serde(default = "default_proxy_api_key")]
     pub proxy_api_key: String,
-    #[serde(default = "default_management_key")]
+    #[serde(default)]
     pub management_key: String,
     #[serde(default)]
     pub commercial_mode: bool,
@@ -111,10 +111,6 @@ fn default_host() -> String {
 
 fn default_disable_control_panel() -> bool {
     true
-}
-
-fn default_management_key() -> String {
-    new_management_key()
 }
 
 fn default_proxy_api_key() -> String {
@@ -267,6 +263,14 @@ fn migrate_config(config: &mut AppConfig) -> bool {
         changed = true;
     }
 
+    // A config written before the key was persisted has no key here. Mint one so
+    // every later load of this file agrees on the same value (issue #235).
+    if config.management_key.trim().is_empty() {
+        eprintln!("[ProxyPal] Config has no management key; generating one...");
+        config.management_key = new_management_key();
+        changed = true;
+    }
+
     // Migrate deprecated single amp_openai_provider to providers array
     if let Some(old_provider) = config.amp_openai_provider.take() {
         if config.amp_openai_providers.is_empty() {
@@ -301,14 +305,28 @@ fn migrate_config(config: &mut AppConfig) -> bool {
 
 fn load_config_from_path(path: &Path) -> AppConfig {
     if !path.exists() {
-        return AppConfig::default();
+        // First run: freeze the generated management key on disk. A key that is
+        // never persisted is minted fresh on every load, so the sidecar's
+        // `remote-management.secret-key` and the `X-Management-Key` header could
+        // never match (issue #235).
+        let config = AppConfig::default();
+        if let Err(e) = save_config_to_path(path, &config) {
+            eprintln!(
+                "[ProxyPal] Could not persist the initial config '{}': {}. The proxy still starts \
+                 with a matching key, but the key changes on the next start.",
+                path.display(),
+                e
+            );
+        }
+        return config;
     }
 
     let data = match std::fs::read_to_string(path) {
         Ok(data) => data,
         Err(e) => {
             eprintln!(
-                "[ProxyPal] Failed to read config file '{}': {}. Falling back to defaults.",
+                "[ProxyPal] Failed to read config file '{}': {}. Falling back to defaults; the \
+                 management key changes on the next start until the file is readable again.",
                 path.display(),
                 e
             );
@@ -320,7 +338,8 @@ fn load_config_from_path(path: &Path) -> AppConfig {
         Ok(config) => config,
         Err(e) => {
             eprintln!(
-                "[ProxyPal] Failed to parse config file '{}': {}. Falling back to defaults.",
+                "[ProxyPal] Failed to parse config file '{}': {}. Falling back to defaults; the \
+                 management key changes on the next start until the file is valid again.",
                 path.display(),
                 e
             );
@@ -437,6 +456,67 @@ mod tests {
         let loaded = load_config_from_path(&path);
 
         assert_eq!(loaded.host, "127.0.0.1");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_config_persists_generated_defaults_on_first_run() {
+        let dir = test_dir("config-first-run");
+        let path = dir.join("config.json");
+
+        let first = load_config_from_path(&path);
+        assert!(path.exists(), "first load should write config.json");
+        assert!(first.management_key.starts_with("proxypal-"));
+
+        let second = load_config_from_path(&path);
+        assert_eq!(
+            first.management_key, second.management_key,
+            "the management key must survive a reload (issue #235)"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_config_mints_and_persists_a_missing_management_key() {
+        let dir = test_dir("config-missing-key");
+        let path = dir.join("config.json");
+        fs::write(
+            &path,
+            r#"{"port": 8317, "autoStart": true, "launchAtLogin": false}"#,
+        )
+        .unwrap();
+
+        let first = load_config_from_path(&path);
+        assert!(first.management_key.starts_with("proxypal-"));
+
+        let persisted = fs::read_to_string(&path).unwrap();
+        assert!(
+            persisted.contains(&first.management_key),
+            "the minted key must be written back, got: {persisted}"
+        );
+
+        let second = load_config_from_path(&path);
+        assert_eq!(first.management_key, second.management_key);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_config_leaves_a_malformed_file_untouched() {
+        let dir = test_dir("config-malformed");
+        let path = dir.join("config.json");
+        fs::write(&path, "{ invalid json").unwrap();
+
+        let loaded = load_config_from_path(&path);
+
+        assert_eq!(loaded.port, AppConfig::default().port);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{ invalid json",
+            "a malformed config must not be overwritten"
+        );
 
         let _ = fs::remove_dir_all(dir);
     }

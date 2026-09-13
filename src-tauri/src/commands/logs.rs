@@ -2,7 +2,7 @@
 
 use crate::state::AppState;
 use crate::types::LogEntry;
-use crate::{build_management_client, get_management_key, get_management_url};
+use crate::{build_management_client, get_management_url};
 use serde::Deserialize;
 use tauri::State;
 
@@ -33,7 +33,7 @@ pub async fn get_logs(
     let client = build_management_client();
     let response = match client
         .get(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
     {
@@ -172,7 +172,7 @@ pub async fn clear_logs(state: State<'_, AppState>) -> Result<(), String> {
     let client = build_management_client();
     let response = client
         .delete(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to clear logs: {}", e))?;

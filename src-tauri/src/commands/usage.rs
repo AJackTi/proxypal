@@ -208,7 +208,10 @@ fn apply_usage_queue_records(
     trim_timeseries(&mut agg.tokens_by_hour, 168);
 }
 
-pub(crate) fn sync_usage_from_queue_blocking(port: u16) -> Result<(), String> {
+pub(crate) fn sync_usage_from_queue_blocking(
+    port: u16,
+    management_key: &str,
+) -> Result<(), String> {
     const BATCH_SIZE: usize = 500;
     const MAX_BATCHES: usize = 20;
 
@@ -216,7 +219,6 @@ pub(crate) fn sync_usage_from_queue_blocking(port: u16) -> Result<(), String> {
         .no_proxy()
         .build()
         .map_err(|e| format!("failed to build HTTP client: {}", e))?;
-    let management_key = crate::get_management_key();
     let mut history = load_request_history();
     let mut agg = load_aggregate();
 
@@ -227,7 +229,7 @@ pub(crate) fn sync_usage_from_queue_blocking(port: u16) -> Result<(), String> {
         );
         let response = client
             .get(&url)
-            .header("X-Management-Key", &management_key)
+            .header("X-Management-Key", management_key)
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .map_err(|e| format!("usage queue request failed: {}", e))?;
@@ -264,7 +266,7 @@ pub(crate) fn sync_usage_from_queue_blocking(port: u16) -> Result<(), String> {
 /// Each call bumps the generation; the spawned thread captures the current value
 /// and exits when the generation advances (via stop or exit).
 /// Prevents stale collector threads from surviving a stop->start cycle.
-pub(crate) fn start_usage_queue_collector(gen: Arc<AtomicU64>, port: u16) {
+pub(crate) fn start_usage_queue_collector(gen: Arc<AtomicU64>, port: u16, management_key: String) {
     // fetch_add returns the old value; +1 gives the post-increment generation
     // that the spawned thread will compare against gen.load() to know when to exit.
     let my_gen = gen.fetch_add(1, Ordering::SeqCst) + 1;
@@ -274,7 +276,7 @@ pub(crate) fn start_usage_queue_collector(gen: Arc<AtomicU64>, port: u16) {
         std::thread::sleep(Duration::from_secs(2));
 
         while gen.load(Ordering::SeqCst) == my_gen {
-            if let Err(e) = sync_usage_from_queue_blocking(port) {
+            if let Err(e) = sync_usage_from_queue_blocking(port, &management_key) {
                 eprintln!("[usage-collector] queue sync failed: {e}");
             }
             // Sleep in 1s chunks — responsive to generation change while avoiding busy-loop
@@ -289,12 +291,14 @@ pub(crate) fn start_usage_queue_collector(gen: Arc<AtomicU64>, port: u16) {
     });
 }
 
-async fn sync_usage_from_queue_async(port: u16) -> Result<RequestHistory, String> {
+async fn sync_usage_from_queue_async(
+    port: u16,
+    management_key: &str,
+) -> Result<RequestHistory, String> {
     const BATCH_SIZE: usize = 500;
     const MAX_BATCHES: usize = 20;
 
     let client = crate::build_management_client();
-    let management_key = crate::get_management_key();
     let mut history = load_request_history();
     let mut agg = load_aggregate();
 
@@ -305,7 +309,7 @@ async fn sync_usage_from_queue_async(port: u16) -> Result<RequestHistory, String
         );
         let response = client
             .get(&url)
-            .header("X-Management-Key", &management_key)
+            .header("X-Management-Key", management_key)
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
@@ -345,8 +349,8 @@ async fn sync_usage_from_queue_async(port: u16) -> Result<RequestHistory, String
 }
 
 // Blocking version of sync — only uses /v0/management/usage-queue
-fn sync_usage_from_proxy_blocking(port: u16) {
-    if let Err(e) = sync_usage_from_queue_blocking(port) {
+fn sync_usage_from_proxy_blocking(port: u16, management_key: &str) {
+    if let Err(e) = sync_usage_from_queue_blocking(port, management_key) {
         eprintln!(
             "[usage] sync_usage_from_proxy_blocking: queue sync failed: {}",
             e
@@ -365,7 +369,7 @@ pub fn get_usage_stats(state: State<'_, AppState>) -> Result<UsageStats, String>
 
     // Sync usage-queue records into persistent aggregate
     if is_running {
-        sync_usage_from_proxy_blocking(port);
+        sync_usage_from_proxy_blocking(port, &state.management_key());
     }
 
     // Now load the updated aggregate and history
@@ -612,12 +616,12 @@ pub fn clear_request_history() -> Result<(), String> {
 // Sync usage statistics from CLIProxyAPI — only uses /v0/management/usage-queue
 #[tauri::command]
 pub async fn sync_usage_from_proxy(state: State<'_, AppState>) -> Result<RequestHistory, String> {
-    let port = {
+    let (port, management_key) = {
         let config = state.config.lock().unwrap();
-        config.port
+        (config.port, config.management_key.clone())
     };
 
-    sync_usage_from_queue_async(port).await
+    sync_usage_from_queue_async(port, &management_key).await
 }
 
 // Export usage statistics from local persistent storage for backup
@@ -945,7 +949,7 @@ mod tests {
         let port = 9999;
         let before = gen.load(Ordering::SeqCst);
 
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         // Generation should have been bumped by 1
         assert_eq!(gen.load(Ordering::SeqCst), before + 1);
     }
@@ -955,7 +959,7 @@ mod tests {
         let gen = Arc::new(AtomicU64::new(0));
         let port = 9999;
 
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         assert_eq!(gen.load(Ordering::SeqCst), 1, "start bumps to 1");
 
         // Signal stop via generation bump
@@ -972,7 +976,7 @@ mod tests {
         let port = 9999;
 
         let before = std::time::Instant::now();
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         // Should return near-instantly (not wait for any sleep)
         assert!(before.elapsed() < std::time::Duration::from_millis(500));
     }
@@ -983,7 +987,7 @@ mod tests {
         let port = 9999;
 
         // Start the collector (captures generation 1 after bump)
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         let after_first = gen.load(Ordering::SeqCst);
         assert_eq!(after_first, 1, "first start bumps to 1");
 
@@ -992,7 +996,7 @@ mod tests {
         assert_eq!(gen.load(Ordering::SeqCst), 2, "stop bumps to 2");
 
         // Start again: bumps generation; new thread captures gen=3, starts fresh
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         assert_eq!(gen.load(Ordering::SeqCst), 3, "second start bumps to 3");
 
         // Thread 1 (captured gen=1) sees gen=3 != 1 => exits on next tick
@@ -1005,7 +1009,7 @@ mod tests {
         let gen = Arc::new(AtomicU64::new(0));
         let port = 0; // Non-running port — collector should handle connection errors gracefully
 
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         assert_eq!(gen.load(Ordering::SeqCst), 1, "start bumps to 1");
 
         // Let it try a sync cycle (will fail on connection, handled gracefully)
@@ -1045,7 +1049,7 @@ mod tests {
         });
 
         let gen = Arc::new(AtomicU64::new(0));
-        start_usage_queue_collector(gen.clone(), port);
+        start_usage_queue_collector(gen.clone(), port, "test-management-key".to_string());
         assert_eq!(gen.load(Ordering::SeqCst), 1, "start bumps to 1");
 
         // Collector sleeps 2 s initially, then makes the HTTP request.

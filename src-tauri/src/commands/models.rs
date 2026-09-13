@@ -713,7 +713,7 @@ pub async fn get_model_definitions(
     let url = crate::get_management_url(config.port, &format!("model-definitions/{}", channel));
     let response = crate::build_management_client()
         .get(&url)
-        .header("X-Management-Key", crate::get_management_key())
+        .header("X-Management-Key", state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch model definitions: {}", e))?;
