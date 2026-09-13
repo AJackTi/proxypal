@@ -23,11 +23,6 @@ use tauri::{
     Emitter, Manager,
 };
 
-/// Get management key from config (used for internal proxy API calls)
-pub(crate) fn get_management_key() -> String {
-    load_config().management_key
-}
-
 // Windows-specific imports for hiding CMD windows
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;

@@ -3,7 +3,7 @@
 use crate::state::AppState;
 use crate::types::{self, AuthFile};
 use crate::utils::detect_provider_from_filename;
-use crate::{build_management_client, get_management_key, get_management_url};
+use crate::{build_management_client, get_management_url};
 use tauri::State;
 
 // Get all auth files
@@ -21,7 +21,7 @@ pub async fn get_auth_files(state: State<'_, AppState>) -> Result<Vec<AuthFile>,
         let client = build_management_client();
         match client
             .get(&url)
-            .header("X-Management-Key", &get_management_key())
+            .header("X-Management-Key", &state.management_key())
             .send()
             .await
         {
@@ -205,7 +205,7 @@ pub async fn upload_auth_file(
 
     let response = client
         .post(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .multipart(form)
         .send()
         .await
@@ -246,7 +246,7 @@ pub async fn delete_auth_file(state: State<'_, AppState>, file_id: String) -> Re
     let client = build_management_client();
     let response = client
         .delete(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to delete auth file: {}", e))?;
@@ -281,7 +281,7 @@ pub async fn toggle_auth_file(
     let client = build_management_client();
     let response_res = client
         .patch(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&serde_json::json!({
             "name": file_name,
             "disabled": disabled
@@ -348,7 +348,7 @@ pub async fn download_auth_file(
     let client = build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to download auth file: {}", e))?;
@@ -383,7 +383,7 @@ pub async fn delete_all_auth_files(state: State<'_, AppState>) -> Result<(), Str
     let client = build_management_client();
     let response = client
         .delete(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to delete all auth files: {}", e))?;
@@ -409,7 +409,7 @@ pub async fn batch_delete_auth_files(
 ) -> Result<serde_json::Value, String> {
     let port = state.config.lock().unwrap().port;
     let client = build_management_client();
-    let management_key = get_management_key();
+    let management_key = state.management_key();
 
     // Try batch endpoint first (CLIProxyAPI v6.9.2+)
     let batch_url = get_management_url(port, "auth-files/batch");
@@ -504,7 +504,7 @@ pub async fn verify_proxy_auth_status(
     let client = build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to verify auth status: {}", e))?;

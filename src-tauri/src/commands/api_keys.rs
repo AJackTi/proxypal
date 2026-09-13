@@ -119,7 +119,7 @@ pub async fn get_gemini_api_keys(state: State<'_, AppState>) -> Result<Vec<Gemin
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch Gemini API keys: {}", e))?;
@@ -145,7 +145,7 @@ pub async fn set_gemini_api_keys(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
@@ -202,7 +202,7 @@ pub async fn get_claude_api_keys(state: State<'_, AppState>) -> Result<Vec<Claud
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch Claude API keys: {}", e))?;
@@ -228,7 +228,7 @@ pub async fn set_claude_api_keys(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
@@ -285,7 +285,7 @@ pub async fn get_codex_api_keys(state: State<'_, AppState>) -> Result<Vec<CodexA
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch Codex API keys: {}", e))?;
@@ -311,7 +311,7 @@ pub async fn set_codex_api_keys(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
@@ -365,7 +365,7 @@ pub async fn get_xai_api_keys(state: State<'_, AppState>) -> Result<Vec<XaiApiKe
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch xAI API keys: {}", e))?;
@@ -397,7 +397,7 @@ pub async fn set_xai_api_keys(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
@@ -445,7 +445,7 @@ pub async fn get_vertex_api_keys(state: State<'_, AppState>) -> Result<Vec<Verte
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch Vertex API keys: {}", e))?;
@@ -471,7 +471,7 @@ pub async fn set_vertex_api_keys(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
@@ -530,7 +530,7 @@ pub async fn get_openai_compatible_providers(
     let client = crate::build_management_client();
     let response = client
         .get(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .send()
         .await
         .map_err(|e| format!("Failed to fetch OpenAI-compatible providers: {}", e))?;
@@ -557,7 +557,7 @@ pub async fn set_openai_compatible_providers(
 
     let response = client
         .put(&url)
-        .header("X-Management-Key", &crate::get_management_key())
+        .header("X-Management-Key", &state.management_key())
         .json(&body)
         .send()
         .await
