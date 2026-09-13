@@ -57,7 +57,26 @@ pub fn get_system_proxy() -> Result<Option<String>, String> {
 /// Hosts the proxy may bind to. The management API, health checks, usage
 /// collector and agent config writers all dial 127.0.0.1, so anything else
 /// would leave the app unable to talk to its own proxy.
-const ALLOWED_HOSTS: [&str; 2] = ["127.0.0.1", "0.0.0.0"];
+const ALL_INTERFACES_HOST: &str = "0.0.0.0";
+const ALLOWED_HOSTS: [&str; 2] = ["127.0.0.1", ALL_INTERFACES_HOST];
+
+/// Best-effort LAN address of this host, used to advertise a reachable URL when
+/// the proxy binds all interfaces. No packets are sent: a UDP `connect` only
+/// selects a route, so this works without reaching the target.
+fn local_lan_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("1.1.1.1:80").ok()?;
+    Some(socket.local_addr().ok()?.ip().to_string())
+}
+
+/// LAN endpoint to advertise for a bind host, or `None` when the proxy is
+/// loopback-only.
+fn lan_endpoint_for(host: &str, port: u16, ip: Option<String>) -> Option<String> {
+    if host != ALL_INTERFACES_HOST {
+        return None;
+    }
+    ip.map(|ip| format!("http://{}:{}/v1", ip, port))
+}
 
 fn validate_host(host: &str) -> Result<(), String> {
     if ALLOWED_HOSTS.contains(&host) {
@@ -862,6 +881,7 @@ pub async fn start_proxy(
                     if let Some(state) = app_handle.try_state::<AppState>() {
                         let mut status = state.proxy_status.lock().unwrap();
                         status.running = false;
+                        status.lan_endpoint = None;
                         let _ = app_handle.emit("proxy-status-changed", status.clone());
                     }
                     break;
@@ -969,6 +989,7 @@ pub async fn start_proxy(
         status.running = true;
         status.port = config.port;
         status.endpoint = format!("http://localhost:{}/v1", config.port);
+        status.lan_endpoint = lan_endpoint_for(&config.host, config.port, local_lan_ip());
         status.clone()
     };
 
@@ -1027,6 +1048,7 @@ pub async fn stop_proxy(
     let new_status = {
         let mut status = state.proxy_status.lock().unwrap();
         status.running = false;
+        status.lan_endpoint = None;
         status.clone()
     };
 
@@ -1112,6 +1134,19 @@ mod tests {
             yaml.contains("host: \"127.0.0.1\""),
             "Expected host: \"127.0.0.1\", got:\n{}",
             yaml
+        );
+    }
+
+    #[test]
+    fn lan_endpoint_is_only_advertised_for_all_interfaces() {
+        assert_eq!(
+            lan_endpoint_for("0.0.0.0", 8317, Some("192.168.1.5".to_string())),
+            Some("http://192.168.1.5:8317/v1".to_string())
+        );
+        assert_eq!(lan_endpoint_for("0.0.0.0", 8317, None), None);
+        assert_eq!(
+            lan_endpoint_for("127.0.0.1", 8317, Some("192.168.1.5".to_string())),
+            None
         );
     }
 

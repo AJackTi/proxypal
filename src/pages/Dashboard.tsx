@@ -865,7 +865,11 @@ export function DashboardPage() {
           />
 
           {/* === ZONE 4: API Endpoint === */}
-          <ApiEndpoint endpoint={proxyStatus().endpoint} running={proxyStatus().running} />
+          <ApiEndpoint
+            endpoint={proxyStatus().endpoint}
+            lanEndpoint={proxyStatus().lanEndpoint}
+            running={proxyStatus().running}
+          />
 
           {/* Config Modal */}
           <Show when={configResult()}>
