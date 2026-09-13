@@ -4,6 +4,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 // Proxy management
 export interface ProxyStatus {
   endpoint: string;
+  /** Set when the proxy binds all interfaces, for Docker and other devices. */
+  lanEndpoint?: string;
   port: number;
   running: boolean;
 }
