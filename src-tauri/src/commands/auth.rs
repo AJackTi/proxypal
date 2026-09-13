@@ -34,11 +34,11 @@ fn unsupported_mainline_oauth_error(provider: &str) -> Option<String> {
                 .to_string(),
         ),
         "qwen" => Some(
-            "Qwen OAuth is not available in the bundled mainline CLIProxyAPI sidecar. Use a custom OpenAI-compatible provider or a Plus sidecar build that exposes Qwen auth."
+            "Qwen OAuth is not available in the bundled mainline CLIProxyAPI sidecar. Use a custom OpenAI-compatible provider instead."
                 .to_string(),
         ),
         "iflow" => Some(
-            "iFlow OAuth is not available in the bundled mainline CLIProxyAPI sidecar. Use a custom OpenAI-compatible provider or a Plus sidecar build that exposes iFlow auth."
+            "iFlow OAuth is not available in the bundled mainline CLIProxyAPI sidecar. Use a custom OpenAI-compatible provider instead."
                 .to_string(),
         ),
         "kiro" => Some(
@@ -70,16 +70,6 @@ pub async fn get_oauth_url(
         config.port
     };
 
-    // Kiro's Web OAuth UI (/v0/oauth/kiro) is a Plus-fork endpoint;
-    // `unsupported_mainline_oauth_error` rejects Kiro before this point.
-    if provider == "kiro" {
-        let kiro_url = format!("http://127.0.0.1:{}/v0/oauth/kiro", port);
-        return Ok(OAuthUrlResponse {
-            url: kiro_url,
-            state: String::new(),
-        });
-    }
-
     // Get the OAuth URL from CLIProxyAPI's Management API
     // Add is_webui=true to use the embedded callback forwarder
     // Use 127.0.0.1 consistently (not localhost) to avoid access control issues
@@ -90,18 +80,6 @@ pub async fn get_oauth_url(
         ),
         "openai" => format!(
             "http://127.0.0.1:{}/v0/management/codex-auth-url?is_webui=true",
-            port
-        ),
-        "gemini" => format!(
-            "http://127.0.0.1:{}/v0/management/gemini-cli-auth-url?is_webui=true",
-            port
-        ),
-        "qwen" => format!(
-            "http://127.0.0.1:{}/v0/management/qwen-auth-url?is_webui=true",
-            port
-        ),
-        "iflow" => format!(
-            "http://127.0.0.1:{}/v0/management/iflow-auth-url?is_webui=true",
             port
         ),
         "antigravity" => format!(
@@ -179,16 +157,13 @@ pub async fn get_device_code(
     };
 
     // Build endpoint WITHOUT ?is_webui=true to trigger device-code flow
-    let endpoint = match provider.as_str() {
-        "openai" => format!("http://127.0.0.1:{}/v0/management/codex-auth-url", port),
-        "qwen" => format!("http://127.0.0.1:{}/v0/management/qwen-auth-url", port),
-        _ => {
-            return Err(format!(
-                "Device code flow not supported for provider: {}",
-                provider
-            ))
-        }
-    };
+    if provider != "openai" {
+        return Err(format!(
+            "Device code flow not supported for provider: {}",
+            provider
+        ));
+    }
+    let endpoint = format!("http://127.0.0.1:{}/v0/management/codex-auth-url", port);
 
     let client = crate::build_management_client();
     let response = client
@@ -270,16 +245,6 @@ pub async fn open_oauth(
         config.port
     };
 
-    // Kiro's Web OAuth UI (/v0/oauth/kiro) is a Plus-fork endpoint;
-    // `unsupported_mainline_oauth_error` rejects Kiro before this point.
-    if provider == "kiro" {
-        let oauth_url = format!("http://127.0.0.1:{}/v0/oauth/kiro", port);
-        app.opener()
-            .open_url(&oauth_url, None::<&str>)
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-        return Ok(String::new()); // No specific state needed for direct Web UI
-    }
-
     // Get the OAuth URL from CLIProxyAPI's Management API
     // Add is_webui=true to use the embedded callback forwarder
     // Use 127.0.0.1 consistently (not localhost) to avoid access control issues
@@ -290,18 +255,6 @@ pub async fn open_oauth(
         ),
         "openai" => format!(
             "http://127.0.0.1:{}/v0/management/codex-auth-url?is_webui=true",
-            port
-        ),
-        "gemini" => format!(
-            "http://127.0.0.1:{}/v0/management/gemini-cli-auth-url?is_webui=true",
-            port
-        ),
-        "qwen" => format!(
-            "http://127.0.0.1:{}/v0/management/qwen-auth-url?is_webui=true",
-            port
-        ),
-        "iflow" => format!(
-            "http://127.0.0.1:{}/v0/management/iflow-auth-url?is_webui=true",
             port
         ),
         "antigravity" => format!(
@@ -316,7 +269,6 @@ pub async fn open_oauth(
             "Vertex uses service account import, not OAuth. Use import_vertex_credential instead."
                 .to_string(),
         ),
-        // Note: Kiro is handled above with direct Web UI
         _ => return Err(format!("Unknown provider: {}", provider)),
     };
 
