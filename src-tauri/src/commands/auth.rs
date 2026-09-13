@@ -70,8 +70,8 @@ pub async fn get_oauth_url(
         config.port
     };
 
-    // Kiro uses a web UI page directly, not a JSON API endpoint
-    // Return the URL directly without making an HTTP request
+    // Kiro's Web OAuth UI (/v0/oauth/kiro) is a Plus-fork endpoint;
+    // `unsupported_mainline_oauth_error` rejects Kiro before this point.
     if provider == "kiro" {
         let kiro_url = format!("http://127.0.0.1:{}/v0/oauth/kiro", port);
         return Ok(OAuthUrlResponse {
@@ -270,7 +270,8 @@ pub async fn open_oauth(
         config.port
     };
 
-    // For Kiro, open the Web OAuth UI directly in CLIProxyAPIPlus
+    // Kiro's Web OAuth UI (/v0/oauth/kiro) is a Plus-fork endpoint;
+    // `unsupported_mainline_oauth_error` rejects Kiro before this point.
     if provider == "kiro" {
         let oauth_url = format!("http://127.0.0.1:{}/v0/oauth/kiro", port);
         app.opener()
