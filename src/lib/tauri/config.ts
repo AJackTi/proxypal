@@ -28,6 +28,8 @@ export interface AppConfig {
   disableControlPanel?: boolean;
   disableCooling: boolean;
   geminiThinkingInjection?: boolean;
+  /** Interface the proxy binds to: "127.0.0.1" (local only) or "0.0.0.0" (all interfaces) */
+  host: string;
   launchAtLogin: boolean;
   locale?: string;
   loggingToFile: boolean;

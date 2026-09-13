@@ -13,6 +13,10 @@ use crate::types::{
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub port: u16,
+    /// Interface the proxy server binds to. Restricted to values that keep the
+    /// app's own loopback clients working — see `commands::proxy::validate_host`.
+    #[serde(default = "default_host")]
+    pub host: String,
     pub auto_start: bool,
     pub launch_at_login: bool,
     #[serde(default)]
@@ -101,6 +105,10 @@ pub struct AppConfig {
     pub disable_control_panel: bool,
 }
 
+fn default_host() -> String {
+    "127.0.0.1".to_string()
+}
+
 fn default_disable_control_panel() -> bool {
     true
 }
@@ -153,6 +161,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             port: 8317,
+            host: default_host(),
             auto_start: true,
             launch_at_login: false,
             debug: false,
@@ -406,10 +415,28 @@ mod tests {
         let loaded = load_config_from_path(&path);
 
         assert_eq!(loaded.port, AppConfig::default().port);
+        assert_eq!(loaded.host, "127.0.0.1");
         assert_eq!(
             loaded.routing_strategy,
             AppConfig::default().routing_strategy
         );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_config_defaults_host_for_legacy_config() {
+        let dir = test_dir("config-host-default");
+        let path = dir.join("config.json");
+        fs::write(
+            &path,
+            r#"{"port": 8317, "autoStart": true, "launchAtLogin": false}"#,
+        )
+        .unwrap();
+
+        let loaded = load_config_from_path(&path);
+
+        assert_eq!(loaded.host, "127.0.0.1");
 
         let _ = fs::remove_dir_all(dir);
     }

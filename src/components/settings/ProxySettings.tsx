@@ -70,6 +70,25 @@ export function ProxySettings(props: ProxySettingsProps) {
 
       <div class="space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
         <label class="block">
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Host</span>
+          <select
+            class="transition-smooth mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"
+            onChange={(e) => local.handleConfigChange("host", e.currentTarget.value)}
+            value={local.config().host}
+          >
+            <option value="127.0.0.1">127.0.0.1 — local only</option>
+            <option value="0.0.0.0">0.0.0.0 — all interfaces (LAN / Docker)</option>
+          </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Interface the proxy server binds to. Use 0.0.0.0 to reach it from Docker containers or
+            other devices — anyone on your network can then use the proxy, so change the Proxy API
+            Key below. Requires a proxy restart to take effect.
+          </p>
+        </label>
+
+        <div class="border-t border-gray-200 dark:border-gray-700" />
+
+        <label class="block">
           <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Port</span>
           <input
             class="transition-smooth mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-900"

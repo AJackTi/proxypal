@@ -60,6 +60,7 @@ function createAppStore() {
     },
     debug: false,
     disableCooling: false,
+    host: "127.0.0.1",
     launchAtLogin: false,
     locale: "en",
     loggingToFile: false,

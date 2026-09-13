@@ -55,6 +55,22 @@ pub fn get_system_proxy() -> Result<Option<String>, String> {
     }
 }
 
+/// Hosts the proxy may bind to. The management API, health checks, usage
+/// collector and agent config writers all dial 127.0.0.1, so anything else
+/// would leave the app unable to talk to its own proxy.
+const ALLOWED_HOSTS: [&str; 2] = ["127.0.0.1", "0.0.0.0"];
+
+fn validate_host(host: &str) -> Result<(), String> {
+    if ALLOWED_HOSTS.contains(&host) {
+        return Ok(());
+    }
+    Err(format!(
+        "Invalid host '{}': must be one of {}",
+        host,
+        ALLOWED_HOSTS.join(", ")
+    ))
+}
+
 /// Build the complete proxy-config.yaml content from AppConfig.
 /// Includes all provider configs, API keys, routing, payload injection,
 /// and appends user customizations from proxy-config-custom.yaml.
@@ -68,6 +84,7 @@ fn build_proxy_config_yaml(
     auth_dir: &std::path::Path,
     oauth_excluded_models_section: &str,
 ) -> Result<String, String> {
+    validate_host(&config.host)?;
     let proxy_url_line = build_proxy_url_line(config);
     let openai_compat_section = build_openai_compat_section(config);
     let claude_api_key_section = build_claude_api_key_section(config);
@@ -84,7 +101,7 @@ fn build_proxy_config_yaml(
 
     let mut proxy_config = format!(
         r#"# ProxyPal generated config
-host: "127.0.0.1"
+host: "{}"
 port: {}
 auth-dir: "{}"
 api-keys:
@@ -114,6 +131,7 @@ request-log: {}
 commercial-mode: {}
 ws-auth: {}
 "#,
+        config.host,
         config.port,
         // Use forward slashes even on Windows — the Go binary handles both,
         // and this avoids YAML escaping issues with backslashes.
@@ -157,6 +175,7 @@ ws-auth: {}
     if custom_config_path.exists() {
         if let Ok(custom_yaml) = std::fs::read_to_string(&custom_config_path) {
             if !custom_yaml.trim().is_empty() {
+                let custom_yaml = drop_duplicate_top_level_keys(&proxy_config, &custom_yaml);
                 proxy_config.push_str("\n# User customizations (from proxy-config-custom.yaml)\n");
                 proxy_config.push_str(&custom_yaml);
                 proxy_config.push('\n');
@@ -165,6 +184,56 @@ ws-auth: {}
     }
 
     Ok(proxy_config)
+}
+
+/// Top-level mapping key of a YAML line, e.g. `host` for `host: "127.0.0.1"`.
+/// Returns `None` for indented lines, list items, comments and blank lines.
+fn top_level_key(line: &str) -> Option<&str> {
+    if line.starts_with([' ', '\t', '#', '-']) {
+        return None;
+    }
+    let (key, _) = line.split_once(':')?;
+    let key = key.trim();
+    if key.is_empty() || key.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(key)
+}
+
+/// Drop top-level keys from `custom_yaml` that `generated_yaml` already defines.
+/// go-yaml rejects duplicate mapping keys, so appending e.g. a user `host:`
+/// override as-is makes the sidecar fail to start.
+fn drop_duplicate_top_level_keys(generated_yaml: &str, custom_yaml: &str) -> String {
+    let generated_keys: Vec<&str> = generated_yaml.lines().filter_map(top_level_key).collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut skipping_block = false;
+
+    for line in custom_yaml.lines() {
+        if let Some(key) = top_level_key(line) {
+            if generated_keys.contains(&key) {
+                eprintln!(
+                    "[ProxyPal] Ignoring duplicate top-level key '{}' from proxy-config-custom.yaml (already set by ProxyPal)",
+                    key
+                );
+                skipping_block = true;
+                continue;
+            }
+            skipping_block = false;
+            kept.push(line);
+            continue;
+        }
+
+        // Drop indented (or blank) lines belonging to a skipped key's block.
+        if skipping_block {
+            if line.starts_with([' ', '\t']) || line.trim().is_empty() {
+                continue;
+            }
+            skipping_block = false;
+        }
+        kept.push(line);
+    }
+
+    kept.join("\n")
 }
 
 fn build_proxy_url_line(config: &AppConfig) -> String {
@@ -677,7 +746,7 @@ pub async fn start_proxy(
         use std::net::TcpListener;
         let mut bind_ok = false;
         for attempt in 0..3 {
-            if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
+            if TcpListener::bind(format!("{}:{}", config.host, port)).is_ok() {
                 bind_ok = true;
                 break;
             }
@@ -691,8 +760,8 @@ pub async fn start_proxy(
                     "\n\nHint: Port {} is held by another process (possibly Docker Desktop or WSL2 portproxy).\n\
                      • Go to Settings → General and change the port to a free one (e.g. 8318).\n\
                      • Or run as Administrator and execute:\n\
-                     \u{0020} netsh interface portproxy delete v4tov4 listenport={} listenaddress=127.0.0.1",
-                    port, port
+                     \u{0020} netsh interface portproxy delete v4tov4 listenport={} listenaddress={}",
+                    port, port, config.host
                 )
             } else {
                 String::new()
@@ -1041,6 +1110,122 @@ mod tests {
             "Expected host: \"127.0.0.1\", got:\n{}",
             yaml
         );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_emits_configured_host() {
+        let mut config = crate::config::AppConfig::default();
+        config.host = "0.0.0.0".to_string();
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-host");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+
+        let yaml = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap();
+
+        assert!(
+            yaml.contains("host: \"0.0.0.0\""),
+            "Expected host: \"0.0.0.0\", got:\n{}",
+            yaml
+        );
+        assert_eq!(
+            yaml.lines()
+                .filter(|l| top_level_key(l) == Some("host"))
+                .count(),
+            1,
+            "Expected exactly one host key, got:\n{}",
+            yaml
+        );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_rejects_unsupported_host() {
+        let mut config = crate::config::AppConfig::default();
+        config.host = "192.168.1.5".to_string();
+        let config_dir = std::path::PathBuf::from("/tmp/proxypal-test-host-invalid");
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+
+        let err = build_proxy_config_yaml(&config, &config_dir, &auth_dir, "").unwrap_err();
+
+        assert!(
+            err.contains("192.168.1.5"),
+            "Expected error to name the rejected host, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn drop_duplicate_top_level_keys_removes_generated_keys_and_their_blocks() {
+        let generated = "host: \"127.0.0.1\"\nport: 8317\nrouting:\n  strategy: \"round-robin\"\n";
+        let custom = "host: \"0.0.0.0\"\npayload:\n  override:\n    - models:\n        - name: \"x\"\nrouting:\n  strategy: \"fill-first\"\nrequest-log: false\n";
+
+        let kept = drop_duplicate_top_level_keys(generated, custom);
+
+        assert!(
+            !kept.contains("host:"),
+            "host should be dropped, got:\n{}",
+            kept
+        );
+        assert!(
+            !kept.contains("routing:"),
+            "routing should be dropped, got:\n{}",
+            kept
+        );
+        assert!(
+            kept.contains("payload:\n  override:"),
+            "payload block lost:\n{}",
+            kept
+        );
+        assert!(
+            kept.contains("- name: \"x\""),
+            "nested payload content lost:\n{}",
+            kept
+        );
+        assert!(
+            kept.contains("request-log: false"),
+            "later key lost:\n{}",
+            kept
+        );
+    }
+
+    #[test]
+    fn build_proxy_config_yaml_drops_duplicate_custom_yaml_keys() {
+        let dir = std::env::temp_dir().join(format!(
+            "proxypal-test-custom-{}",
+            crate::types::amp::generate_uuid()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("proxy-config-custom.yaml"),
+            "host: \"0.0.0.0\"\nport: 9999\nincognito-browser: true\n",
+        )
+        .unwrap();
+
+        let config = crate::config::AppConfig::default();
+        let auth_dir = std::path::PathBuf::from("/tmp/.cli-proxy-api-test");
+        let yaml = build_proxy_config_yaml(&config, &dir, &auth_dir, "").unwrap();
+
+        assert_eq!(
+            yaml.lines()
+                .filter(|l| top_level_key(l) == Some("host"))
+                .count(),
+            1,
+            "Expected a single host key, got:\n{}",
+            yaml
+        );
+        assert_eq!(
+            yaml.lines()
+                .filter(|l| top_level_key(l) == Some("port"))
+                .count(),
+            1,
+            "Expected a single port key, got:\n{}",
+            yaml
+        );
+        assert!(
+            yaml.contains("incognito-browser: true"),
+            "Non-duplicate customization should survive, got:\n{}",
+            yaml
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
