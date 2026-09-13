@@ -11,7 +11,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CLIPROXYAPI_CHANNEL: mainline
   CLIPROXYAPI_VERSION: "7.2.159"
 
 jobs:
@@ -42,9 +41,6 @@ jobs:
             exit 1
           fi
           SIDECAR_REPO="router-for-me/CLIProxyAPI"
-          if [ "$CLIPROXYAPI_CHANNEL" = "plus" ]; then
-            SIDECAR_REPO="router-for-me/CLIProxyAPIPlus"
-          fi
           SIDECAR_TAG="v${CLIPROXYAPI_VERSION}"
           SIDECAR_VERSION=$(gh release view "$SIDECAR_TAG" --repo "$SIDECAR_REPO" --json tagName --jq '.tagName')
           if [ "$SIDECAR_VERSION" != "$SIDECAR_TAG" ]; then
@@ -163,8 +159,8 @@ jobs:
               ;;
           esac
 
-          echo "Downloading CLIProxyAPI sidecar channel '$CLIPROXYAPI_CHANNEL' for ${{ matrix.target }}..."
-          node scripts/update-sidecar.mjs --channel "$CLIPROXYAPI_CHANNEL" --force "$BINARY"
+          echo "Downloading CLIProxyAPI sidecar for ${{ matrix.target }}..."
+          node scripts/update-sidecar.mjs --force "$BINARY"
 
           echo "Downloaded:"
           ls -la "$GITHUB_WORKSPACE/src-tauri/binaries/"
@@ -304,9 +300,6 @@ jobs:
 
           # Get release info for the exact CLIProxyAPI version bundled above
           SIDECAR_REPO="router-for-me/CLIProxyAPI"
-          if [ "$CLIPROXYAPI_CHANNEL" = "plus" ]; then
-            SIDECAR_REPO="router-for-me/CLIProxyAPIPlus"
-          fi
           SIDECAR_TAG="v${CLIPROXYAPI_VERSION}"
           SIDECAR_RELEASE=$(gh release view "v${CLIPROXYAPI_VERSION}" --repo "$SIDECAR_REPO" --json tagName,body)
           SIDECAR_VERSION=$(echo "$SIDECAR_RELEASE" | jq -r '.tagName // "unknown"')
@@ -332,7 +325,7 @@ jobs:
 
           CHANGELOG="$CHANGELOG
 
-          ### Sidecar: CLIProxyAPI ($CLIPROXYAPI_CHANNEL) $SIDECAR_VERSION"
+          ### Sidecar: CLIProxyAPI $SIDECAR_VERSION"
 
           if [ -n "$SIDECAR_HIGHLIGHTS" ]; then
             CHANGELOG="$CHANGELOG
@@ -375,7 +368,7 @@ jobs:
             echo "| Linux (Fedora/RHEL) | \`.rpm\` package |"
             echo ""
             echo "---"
-            echo "*Bundled sidecar: CLIProxyAPI (${{ env.CLIPROXYAPI_CHANNEL }}) $SIDECAR_VERSION*"
+            echo "*Bundled sidecar: CLIProxyAPI $SIDECAR_VERSION*"
           } > /tmp/release_body.md
 
           echo "=== Release body ==="

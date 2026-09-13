@@ -32,46 +32,34 @@ function readPinnedSidecarVersion() {
   return null;
 }
 
-async function resolveRelease(channelConfig, headers) {
+async function resolveRelease(config, headers) {
   const pinnedVersion = readPinnedSidecarVersion();
   if (!pinnedVersion) {
     throw new Error(
       "No pinned CLIProxyAPI version found. Set CLIPROXYAPI_VERSION or restore scripts/sidecar-version.",
     );
   }
-  const apiUrl = `https://api.github.com/repos/${channelConfig.repo}/releases/tags/v${pinnedVersion}`;
+  const apiUrl = `https://api.github.com/repos/${config.repo}/releases/tags/v${pinnedVersion}`;
 
   const apiRes = await fetch(apiUrl, { headers });
   if (!apiRes.ok) {
-    const hint = channelConfig.repo.includes("CLIProxyAPIPlus")
-      ? "\nCLIProxyAPIPlus may be private, renamed, or unavailable. To use mainline instead, run: CLIPROXYAPI_CHANNEL=mainline pnpm update-sidecar"
-      : pinnedVersion
-        ? `\nPinned sidecar version v${pinnedVersion} was not found. Update scripts/sidecar-version or set CLIPROXYAPI_VERSION.`
-        : "";
     throw new Error(
-      `GitHub API error (${apiRes.status}): ${apiRes.statusText} for ${apiUrl}${hint}`,
+      `GitHub API error (${apiRes.status}): ${apiRes.statusText} for ${apiUrl}\n` +
+        `Pinned sidecar version v${pinnedVersion} was not found. Update scripts/sidecar-version or set CLIPROXYAPI_VERSION.`,
     );
   }
 
   return apiRes.json();
 }
 
-const CHANNELS = {
-  plus: {
-    repo: "router-for-me/CLIProxyAPIPlus",
-    assetPrefix: "CLIProxyAPIPlus",
-    label: "CLIProxyAPIPlus",
-  },
-  mainline: {
-    repo: "router-for-me/CLIProxyAPI",
-    assetPrefix: "CLIProxyAPI",
-    label: "CLIProxyAPI",
-  },
+const MAINLINE = {
+  repo: "router-for-me/CLIProxyAPI",
+  assetPrefix: "CLIProxyAPI",
+  label: "CLIProxyAPI",
 };
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  let channel = process.env.CLIPROXYAPI_CHANNEL || "mainline";
   let force = false;
   let requestedTarget = null;
 
@@ -79,13 +67,6 @@ function parseArgs() {
     const arg = args[i];
     if (arg === "--force") {
       force = true;
-    } else if (arg === "--channel") {
-      const value = args[i + 1];
-      if (!value) throw new Error("Missing value for --channel");
-      channel = value;
-      i += 1;
-    } else if (arg.startsWith("--channel=")) {
-      channel = arg.slice("--channel=".length);
     } else if (arg.startsWith("--")) {
       throw new Error(`Unknown option: ${arg}`);
     } else if (!requestedTarget) {
@@ -95,21 +76,14 @@ function parseArgs() {
     }
   }
 
-  if (!CHANNELS[channel]) {
-    throw new Error(
-      `Unknown sidecar channel: ${channel}. Expected one of: ${Object.keys(CHANNELS).join(", ")}`,
-    );
-  }
-
-  return { channel, force, requestedTarget };
+  return { force, requestedTarget };
 }
 
-function getChannelConfig(channel) {
-  const defaults = CHANNELS[channel];
+function getSidecarConfig() {
   return {
-    ...defaults,
-    repo: process.env.CLIPROXYAPI_REPO || defaults.repo,
-    assetPrefix: process.env.CLIPROXYAPI_ASSET_PREFIX || defaults.assetPrefix,
+    ...MAINLINE,
+    repo: process.env.CLIPROXYAPI_REPO || MAINLINE.repo,
+    assetPrefix: process.env.CLIPROXYAPI_ASSET_PREFIX || MAINLINE.assetPrefix,
   };
 }
 
@@ -258,7 +232,7 @@ function getAssetInfo(target, version, assetPrefix) {
 }
 
 function findBinary(dir, { includeExe = false } = {}) {
-  const names = ["cli-proxy-api-plus", "CLIProxyAPIPlus", "CLIProxyAPI", "cli-proxy-api"];
+  const names = ["CLIProxyAPI", "cli-proxy-api"];
   // Add .exe variants when on Windows OR when cross-downloading Windows targets
   if (process.platform === "win32" || includeExe) {
     names.push(...names.map((n) => n + ".exe"));
@@ -282,8 +256,8 @@ function findBinary(dir, { includeExe = false } = {}) {
   return null;
 }
 
-async function downloadTarget(target, version, channelConfig, releaseAssets = null) {
-  const assetInfo = getAssetInfo(target, version, channelConfig.assetPrefix);
+async function downloadTarget(target, version, config, releaseAssets = null) {
+  const assetInfo = getAssetInfo(target, version, config.assetPrefix);
   if (!assetInfo) throw new Error(`Unknown target: ${target}`);
 
   const [assetNames, archiveType] = assetInfo;
@@ -291,7 +265,7 @@ async function downloadTarget(target, version, channelConfig, releaseAssets = nu
   if (!assetName) {
     throw new Error(`No matching asset found for ${target}. Tried: ${assetNames.join(", ")}`);
   }
-  const url = `https://github.com/${channelConfig.repo}/releases/download/v${version}/${assetName}`;
+  const url = `https://github.com/${config.repo}/releases/download/v${version}/${assetName}`;
 
   console.log(`Downloading ${assetName}...`);
 
@@ -300,7 +274,7 @@ async function downloadTarget(target, version, channelConfig, releaseAssets = nu
   const buffer = Buffer.from(await res.arrayBuffer());
 
   // Verify archive integrity against checksums.txt before any filesystem writes
-  await verifyChecksum(channelConfig.repo, version, assetName, buffer);
+  await verifyChecksum(config.repo, version, assetName, buffer);
 
   const tempDir = join(BINARIES_DIR, ".tmp-download");
   mkdirSync(tempDir, { recursive: true });
@@ -347,28 +321,25 @@ async function downloadTarget(target, version, channelConfig, releaseAssets = nu
 }
 
 async function main() {
-  const { channel, force, requestedTarget } = parseArgs();
-  const channelConfig = getChannelConfig(channel);
+  const { force, requestedTarget } = parseArgs();
+  const config = getSidecarConfig();
 
   const headers = { "User-Agent": "proxypal-sidecar-updater" };
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const release = await resolveRelease(channelConfig, headers);
+  const release = await resolveRelease(config, headers);
   const version = release.tag_name.replace(/^v/, "");
   const pinnedVersion = readPinnedSidecarVersion();
   const releaseAssets = new Set((release.assets || []).map((asset) => asset.name));
-  console.log(`${channelConfig.label} channel: ${channel}`);
-  console.log(`${channelConfig.label} repo: ${channelConfig.repo}`);
-  console.log(
-    `${channelConfig.label} version: ${version}${pinnedVersion ? " (pinned)" : " (latest)"}`,
-  );
+  console.log(`${config.label} repo: ${config.repo}`);
+  console.log(`${config.label} version: ${version}${pinnedVersion ? " (pinned)" : " (latest)"}`);
 
   mkdirSync(BINARIES_DIR, { recursive: true });
 
   if (requestedTarget) {
     // Download specific target
-    await downloadTarget(requestedTarget, version, channelConfig, releaseAssets);
+    await downloadTarget(requestedTarget, version, config, releaseAssets);
   } else {
     // Download for current platform only
     const target = getCurrentTarget();
@@ -377,7 +348,7 @@ async function main() {
       console.log(`Binary exists: ${destPath} (use --force to re-download)`);
       return;
     }
-    await downloadTarget(target, version, channelConfig, releaseAssets);
+    await downloadTarget(target, version, config, releaseAssets);
   }
 }
 

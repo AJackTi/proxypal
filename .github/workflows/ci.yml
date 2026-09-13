@@ -6,19 +6,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      sidecar_channel:
-        description: "Sidecar release channel to bundle (mainline is CI-safe; Plus may be unavailable)"
-        required: true
-        default: "mainline"
-        type: choice
-        options:
-          - plus
-          - mainline
 
 env:
   CARGO_TERM_COLOR: always
-  CLIPROXYAPI_CHANNEL: ${{ github.event.inputs.sidecar_channel || 'mainline' }}
   CLIPROXYAPI_VERSION: "7.2.159"
 
 jobs:
@@ -149,8 +139,8 @@ jobs:
               ;;
           esac
 
-          echo "Downloading CLIProxyAPI sidecar channel '$CLIPROXYAPI_CHANNEL' for ${{ matrix.target }}..."
-          node scripts/update-sidecar.mjs --channel "$CLIPROXYAPI_CHANNEL" --force "$BINARY"
+          echo "Downloading CLIProxyAPI sidecar for ${{ matrix.target }}..."
+          node scripts/update-sidecar.mjs --force "$BINARY"
 
           echo "Downloaded:"
           ls -la "$GITHUB_WORKSPACE/src-tauri/binaries/"
