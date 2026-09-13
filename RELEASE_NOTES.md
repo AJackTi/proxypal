@@ -1,3 +1,32 @@
+# ProxyPal v0.4.54
+
+**Released:** 2026-09-13
+
+## CLIProxyAPI v7.2.159
+
+- Updates the pinned mainline sidecar from v7.2.155 to v7.2.159; checksum-verified download, smoke PASS (7.2.159/ac02da6c), updater tests 20/20.
+- Claude: emits a trailing usage chunk and aggregates stream usage, preserves the 1h cache TTL and beta header for subagent requests, validates CAQS reasoning signatures, and anchors the billing fingerprint to the initial turn for cloaked cache stability.
+- Codex and OpenAI: model-level quota cooling, `gpt-image-2.5` models, reasoning deltas processed before content in the responses stream, capacity errors treated as bootstrap overload failures, and the Codex user-agent bumped to 0.154.0.
+- Gemini and Antigravity: function-call pairing preserved for interrupted calls, thought tokens included in OpenAI completion/responses usage, Gemini 3 server-side tool thought signatures preserved, and model capability probes cached and deduplicated.
+- Auth: organization-hashed Claude credentials with legacy migration, cooldowns cleared on credential change and rotated on model-not-found, Cloudflare 520-526 treated as transient, bounded force-refresh concurrency, and stale auth updates dropped via monotonic watcher revisions.
+- Management API additions: `/auth-files/refresh` and `/quota/providers`, `/quota/fetch`, `/quota/reset`; usage records now carry the upstream `base_url`, and `model-level-cooling` joins the config surface. No existing route or config key was removed or renamed.
+
+## Features
+
+- **Configurable bind host** (#242). Settings → General now offers a Host control beside Port: `127.0.0.1` (local only, default) or `0.0.0.0` (all interfaces), so Docker containers and other devices can reach the proxy. The dashboard shows the LAN endpoint whenever the proxy binds all interfaces. The management API stays local-only (`remote-management.allow-remote: false`), and `proxy-config-custom.yaml` keys that ProxyPal already generates are now dropped with a warning instead of producing a config the sidecar refuses to parse.
+
+## Fixes
+
+- **Management key is state-owned** (#235). On a fresh install every `/v0/management/*` request sent a different key, because the key was regenerated on each disk read while the sidecar had the key written at startup; the sidecar answered `401` and then IP-banned the app, surfacing as `403 Forbidden` on any provider action. The key now comes from app state — the same value written into the generated config — generated defaults are persisted on first run, and configs that predate the field are migrated and saved once.
+
+## Cleanups
+
+- Removed the AI PR review workflow: its action (`coderabbitai/ai-pr-reviewer`) no longer exists upstream, so the check failed on every pull request.
+- Removed the CLIProxyAPI Plus sidecar channel and the unreachable Plus-only OAuth paths for gemini, qwen, iflow and kiro; the fork returns 404 and the bundled sidecar never served those endpoints.
+- Bumped the GitHub Actions used by CI to Node 24 runtimes (`checkout@v7`, `setup-node@v7`, `upload-artifact@v7`, `pnpm/action-setup@v6`), clearing the Node 20 deprecation annotations.
+
+---
+
 # ProxyPal v0.4.53
 
 **Released:** 2026-09-09
