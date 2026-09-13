@@ -12,7 +12,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CLIPROXYAPI_CHANNEL: mainline
-  CLIPROXYAPI_VERSION: "7.2.155"
+  CLIPROXYAPI_VERSION: "7.2.159"
 
 jobs:
   preflight:
